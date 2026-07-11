@@ -272,13 +272,46 @@ let springVels = graphData.map(() => new THREE.Vector3());
 let springActive = false;
 const SPRING_K = 8, SPRING_DAMP = 0.7;
 
-// Diffusion dimming state
-let hoverDist = null; // Map<idx, distance> from hovered node
-let curNodeAlpha = graphData.map(() => 1.0); // current glow alpha
-let tgtNodeAlpha = graphData.map(() => 1.0); // target glow alpha
-let curEdgeAlpha = edges.map(() => 1.0); // current edge alpha
-let tgtEdgeAlpha = edges.map(() => 1.0); // target edge alpha
-const ALPHA_LERP = 3.0; // lerp speed
+// Focus highlight ring
+let focusRing = null;
+function showFocusRing(nodeMesh, colorHex, nodeR) {
+  if (focusRing) { focusRing.geometry.dispose(); focusRing.material.dispose(); scene.remove(focusRing); }
+  const col = new THREE.Color(colorHex);
+  const bright = col.clone().multiplyScalar(1.8);
+  const geo = new THREE.TorusGeometry(nodeR * 1.15, 0.06, 16, 48);
+  const mat = new THREE.MeshBasicMaterial({ color: bright, transparent: true, opacity: 0.8, depthWrite: false });
+  focusRing = new THREE.Mesh(geo, mat);
+  focusRing.position.copy(nodeMesh.position);
+  scene.add(focusRing);
+}
+function hideFocusRing() {
+  if (focusRing) { focusRing.geometry.dispose(); focusRing.material.dispose(); scene.remove(focusRing); focusRing = null; }
+}
+
+// Focus diffusion state (dim distant nodes/edges in focus mode)
+let curGlowAlpha = graphData.map(() => 1.0);
+let tgtGlowAlpha = graphData.map(() => 1.0);
+let curEdgeAlpha = edges.map(() => 1.0);
+let tgtEdgeAlpha = edges.map(() => 1.0);
+const DIFF_LERP = 2.5;
+
+function setFocusDiffusion(fi) {
+  if (fi === null) {
+    tgtGlowAlpha.forEach((_,i) => tgtGlowAlpha[i] = 1.0);
+    tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
+    return;
+  }
+  const dist = bfs(fi);
+  for (let i=0;i<graphData.length;i++) {
+    const d = dist.has(i) ? dist.get(i) : 999;
+    tgtGlowAlpha[i] = d===0?1.0 : d===1?0.7 : d===2?0.4 : d===3?0.18 : 0.06;
+  }
+  edges.forEach(([f,t],k) => {
+    const df = dist.has(f)?dist.get(f):999, dt = dist.has(t)?dist.get(t):999;
+    const d = Math.min(df, dt);
+    tgtEdgeAlpha[k] = d===0?1.0 : d===1?0.55 : d===2?0.25 : d===3?0.1 : 0.04;
+  });
+}
 let dirty = false;
 let didDrag = false; // true if mousemove happened during drag → suppresses click
 const cameraTarget = new THREE.Vector3(18, 10, 22);
@@ -353,33 +386,29 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       dirty = true;
     }
   } else {
-    // --- Diffusion hover (debounced) ---
+    // --- Hover highlight (debounced) ---
     const hit = findHitNode(e);
     const targetIdx = hit ? hit.object.userData.idx : null;
     if (targetIdx !== hoveredIdx) {
       clearTimeout(hoverTimeout);
       if (targetIdx === null) {
-        // Leaving: fade everything back to full
+        // Leaving immediately clears highlight
         hoveredIdx = null;
-        hoverDist = null;
-        tgtNodeAlpha.forEach((_,i) => tgtNodeAlpha[i] = 1.0);
-        tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
+        setEdgeHighlight(null);
+        nodeMeshes.forEach(({ mesh }) => {
+          if (mesh.children.length>0) mesh.children[0].visible = true;
+          if (mesh.material.uniforms) mesh.material.uniforms.uHover.value = 0;
+        });
       } else {
-        // Entering: delay 150ms, then compute distance-based targets
+        // Entering: delay 150ms before showing highlight
         hoverTimeout = setTimeout(() => {
           hoveredIdx = targetIdx;
-          hoverDist = bfs(hoveredIdx);
-          // Node targets: exponential falloff by distance
-          for (let i=0;i<graphData.length;i++) {
-            const d = hoverDist.has(i) ? hoverDist.get(i) : 999;
-            tgtNodeAlpha[i] = d === 0 ? 1.0 : d === 1 ? 0.65 : d === 2 ? 0.35 : d === 3 ? 0.15 : 0.06;
-          }
-          // Edge targets: based on min distance of two endpoints
-          edges.forEach(([f,t],k) => {
-            const df = hoverDist.has(f) ? hoverDist.get(f) : 999;
-            const dt = hoverDist.has(t) ? hoverDist.get(t) : 999;
-            const d = Math.min(df, dt);
-            tgtEdgeAlpha[k] = d === 0 ? 1.0 : d === 1 ? 0.5 : d === 2 ? 0.2 : d === 3 ? 0.08 : 0.03;
+          setEdgeHighlight(hoveredIdx);
+          const neighborSet = new Set([hoveredIdx, ...(adjMap.get(hoveredIdx)||[])]);
+          nodeMeshes.forEach(({ mesh }, i) => {
+            const on = neighborSet.has(i);
+            if (mesh.children.length>0) mesh.children[0].visible = on;
+            if (mesh.material.uniforms) mesh.material.uniforms.uHover.value = (i===hoveredIdx) ? 1 : 0;
           });
         }, 150);
       }
@@ -398,10 +427,14 @@ renderer.domElement.addEventListener('mouseup', () => {
 renderer.domElement.addEventListener('mouseleave', () => {
   if (dragNode) { dragNode = null; controls.enabled = true; }
   clearTimeout(hoverTimeout);
-  hoveredIdx = null;
-  hoverDist = null;
-  tgtNodeAlpha.forEach((_,i) => tgtNodeAlpha[i] = 1.0);
-  tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
+  if (hoveredIdx !== null) {
+    hoveredIdx = null;
+    setEdgeHighlight(null);
+    nodeMeshes.forEach(({ mesh }) => {
+      if (mesh.children.length>0) mesh.children[0].visible = true;
+      if (mesh.material.uniforms && mesh.material.uniforms.uHover) mesh.material.uniforms.uHover.value = 0;
+    });
+  }
 });
 
 // --- Click (separate from drag & orbit) ---
@@ -409,21 +442,22 @@ let mouseDownPos = new THREE.Vector2();
 
 renderer.domElement.addEventListener('click', (e) => {
   const mdx = e.clientX - mouseDownPos.x, mdy = e.clientY - mouseDownPos.y;
-  if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy) > 3) return;
-  // Reset diffusion on click
-  hoveredIdx = null; hoverDist = null;
-  tgtNodeAlpha.forEach((_,i) => tgtNodeAlpha[i] = 1.0);
-  tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
+  if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy) > 3) return; // was a drag or orbit
   const hit = findHitNode(e);
   if (hit) {
-    springActive = false; // cancel any spring-back
+    springActive = false;
     focusedIdx = hit.object.userData.idx;
     targets = radialLayout(focusedIdx);
+    setFocusDiffusion(focusedIdx);
     cameraTarget.copy(focusCam);
+    const fd = graphData[focusedIdx];
+    showFocusRing(nodeMeshes[focusedIdx].mesh, fd.color, fd.r);
   } else {
     springActive = false;
     focusedIdx = null;
+    hideFocusRing();
     targets = origPos.map(p=>p.clone());
+    setFocusDiffusion(null);
     cameraTarget.copy(defaultCam);
   }
   dirty = true;
@@ -493,17 +527,21 @@ function animate() {
     });
   }
 
-  // --- Diffusion alpha lerp (every frame, not just when moving) ---
-  for (let i=0;i<graphData.length;i++) {
-    curNodeAlpha[i] += (tgtNodeAlpha[i] - curNodeAlpha[i]) * ALPHA_LERP * dt;
-    const m = nodeMeshes[i].mesh;
-    if (m.children.length>0) m.children[0].material.uniforms.uGlowOpacity.value = curNodeAlpha[i];
-    if (m.material.uniforms) m.material.uniforms.uHover.value = (hoveredIdx === i) ? 1.0 : curNodeAlpha[i];
+  // Focus diffusion: smooth alpha transitions (glow only when not hovering)
+  if (hoveredIdx === null) {
+    for (let i=0;i<graphData.length;i++) {
+      curGlowAlpha[i] += (tgtGlowAlpha[i]-curGlowAlpha[i]) * DIFF_LERP * dt;
+      const m = nodeMeshes[i].mesh;
+      if (m.children.length>0) m.children[0].material.uniforms.uGlowOpacity.value = curGlowAlpha[i];
+    }
   }
-  for (let k=0;k<edges.length;k++) {
-    curEdgeAlpha[k] += (tgtEdgeAlpha[k] - curEdgeAlpha[k]) * ALPHA_LERP * dt;
-    const eo = edgeObjects[k];
-    if (eo) { eo.main.material.opacity = 0.5 * curEdgeAlpha[k]; eo.core.material.opacity = 0.3 * curEdgeAlpha[k]; }
+  // Edge alpha from focus diffusion (only when not hovering + focused)
+  if (hoveredIdx === null && focusedIdx !== null) {
+    for (let k=0;k<edges.length;k++) {
+      curEdgeAlpha[k] += (tgtEdgeAlpha[k]-curEdgeAlpha[k]) * DIFF_LERP * dt;
+      const eo = edgeObjects[k];
+      if (eo) { eo.main.material.opacity = 0.5 * curEdgeAlpha[k]; eo.core.material.opacity = 0.3 * curEdgeAlpha[k]; }
+    }
   }
 
   if (moving||dirty) { refreshEdgePositions(); updateLabels(); dirty=false; }
@@ -519,6 +557,13 @@ function animate() {
     mesh.scale.setScalar(cur+(tgt-cur)*4.0*dt);
   });
   if (focusedIdx!==null) { const fm=nodeMeshes[focusedIdx].mesh, p=1+Math.sin(elapsed*4.0)*0.04; fm.scale.setScalar(fm.scale.x+(p-fm.scale.x)*0.3); }
+  // Sync focus ring position + scale
+  if (focusRing) {
+    const fm = nodeMeshes[focusedIdx].mesh;
+    focusRing.position.copy(fm.position);
+    const s = fm.scale.x;
+    focusRing.scale.setScalar(s);
+  }
 
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
