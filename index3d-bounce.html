@@ -32,7 +32,7 @@ scene.background = new THREE.Color('#080c12');
 scene.fog = new THREE.FogExp2('#080c12', 0.00006);
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.5, 200);
-camera.position.set(18, 10, 22);
+camera.position.set(0, 14, 16);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -266,6 +266,12 @@ let hoveredIdx = null;
 const origPos = graphData.map(d => new THREE.Vector3(...d.pos));
 let targets = origPos.map(p => p.clone());
 
+// Spring-back state
+let restPositions = origPos.map(p => p.clone());
+let springVels = graphData.map(() => new THREE.Vector3());
+let springActive = false;
+const SPRING_K = 8, SPRING_DAMP = 0.7;
+
 // Focus highlight ring
 let focusRing = null;
 function showFocusRing(nodeMesh, colorHex, nodeR) {
@@ -308,8 +314,7 @@ function setFocusDiffusion(fi) {
 }
 let dirty = false;
 let didDrag = false;
-const cameraTarget = new THREE.Vector3(18, 10, 22);
-const defaultCam = new THREE.Vector3(18, 10, 22);
+let cameraTarget = null; // null = don't touch camera; set = lerp toward this
 const focusCam = new THREE.Vector3(0, 14, 16);
 
 function bfs(startIdx) {
@@ -413,6 +418,8 @@ renderer.domElement.addEventListener('mousemove', (e) => {
 renderer.domElement.addEventListener('mouseup', () => {
   if (dragNode) {
     dragNode = null; controls.enabled = true;
+    springVels.forEach(v => v.set(0,0,0));
+    springActive = true;
   }
 });
 
@@ -437,18 +444,20 @@ renderer.domElement.addEventListener('click', (e) => {
   if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy) > 3) return; // was a drag or orbit
   const hit = findHitNode(e);
   if (hit) {
+    springActive = false;
     focusedIdx = hit.object.userData.idx;
     targets = radialLayout(focusedIdx);
     setFocusDiffusion(focusedIdx);
-    cameraTarget.copy(focusCam);
+    cameraTarget = focusCam.clone();
     const fd = graphData[focusedIdx];
     showFocusRing(nodeMeshes[focusedIdx].mesh, fd.color, fd.r);
   } else {
+    springActive = false;
     focusedIdx = null;
     hideFocusRing();
     targets = origPos.map(p=>p.clone());
     setFocusDiffusion(null);
-    cameraTarget.copy(defaultCam);
+    cameraTarget = null; // release camera back to user
   }
   dirty = true;
   const el=document.getElementById('focusLabel'), sp=el.querySelector('span');
@@ -464,6 +473,8 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   if (hit) {
     dragNode = hit.object;
     didDrag = false;
+    springActive = false;
+    nodeMeshes.forEach(({mesh},i) => restPositions[i].copy(mesh.position));
     controls.enabled = false;
     const normal = camera.getWorldDirection(new THREE.Vector3()).clone();
     dragPlane.set(normal, -dragNode.position.dot(normal));
@@ -483,13 +494,36 @@ function animate() {
 
   let moving = false;
 
-  // Normal movement: lerp to targets (for focus animation)
-  nodeMeshes.forEach(({ mesh }, i) => {
-    if (dragNode && mesh === dragNode) { moving = true; return; }
-    const t=targets[i], dx=t.x-mesh.position.x, dy=t.y-mesh.position.y, dz=t.z-mesh.position.z;
-    const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
-    if (dist>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
-  });
+  // Spring-back (only from node drag, not orbit)
+  if (springActive && !dragNode) {
+    let settled = true;
+    nodeMeshes.forEach(({ mesh }, i) => {
+      const dx = restPositions[i].x - mesh.position.x;
+      const dy = restPositions[i].y - mesh.position.y;
+      const dz = restPositions[i].z - mesh.position.z;
+      const dist = Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if (dist > 0.005 || springVels[i].length() > 0.005) settled = false;
+      springVels[i].x += dx * SPRING_K * dt;
+      springVels[i].y += dy * SPRING_K * dt;
+      springVels[i].z += dz * SPRING_K * dt;
+      springVels[i].multiplyScalar(SPRING_DAMP);
+      mesh.position.x += springVels[i].x * dt;
+      mesh.position.y += springVels[i].y * dt;
+      mesh.position.z += springVels[i].z * dt;
+      targets[i].copy(mesh.position);
+    });
+    if (settled) { springActive = false; springVels.forEach(v => v.set(0,0,0)); }
+    moving = true;
+  }
+  // Focus animation: lerp to radial layout targets
+  else if (focusedIdx !== null) {
+    nodeMeshes.forEach(({ mesh }, i) => {
+      if (dragNode && mesh === dragNode) { moving = true; return; }
+      const t=targets[i], dx=t.x-mesh.position.x, dy=t.y-mesh.position.y, dz=t.z-mesh.position.z;
+      const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if (dist>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
+    });
+  }
 
   // Focus diffusion: smooth alpha transitions (glow only when not hovering)
   if (hoveredIdx === null) {
@@ -510,8 +544,11 @@ function animate() {
 
   if (moving||dirty) { refreshEdgePositions(); updateLabels(); dirty=false; }
 
-  camera.position.lerp(cameraTarget, 1.5*dt);
-  controls.target.lerp(focusedIdx!==null ? nodeMeshes[focusedIdx].mesh.position : new THREE.Vector3(0,0,0), 2.5*dt);
+  // Camera: only auto-move when transitioning to focus
+  if (cameraTarget) {
+    camera.position.lerp(cameraTarget, 2.5*dt);
+    controls.target.lerp(focusedIdx!==null ? nodeMeshes[focusedIdx].mesh.position : new THREE.Vector3(0,0,0), 2.5*dt);
+  }
 
   nodeMeshes.forEach(({ mesh }) => { if(mesh.material.uniforms) mesh.material.uniforms.uCameraPos.value.copy(camera.position); });
   stars.rotation.y += dt*0.015; stars.rotation.x += dt*0.008;
