@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Line Style Comparison</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #080c12; color: #ccc; font-family: "Inter","PingFang SC",system-ui,sans-serif; overflow-x: hidden; }
+  h1 { text-align: center; padding: 32px 0 8px; font-weight: 400; font-size: 18px; letter-spacing: 0.04em; color: #889; }
+  .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .card { background: #11161d; border: 1px solid #1e2630; border-radius: 10px; overflow: hidden; width: 340px; }
+  .card canvas { display: block; width: 100%; height: 200px; }
+  .card .meta { padding: 12px 16px; }
+  .card .meta h3 { font-size: 13px; font-weight: 500; margin-bottom: 4px; color: #ddd; }
+  .card .meta p { font-size: 11px; color: #778; line-height: 1.5; }
+  .card.selected { border-color: #7aacff; box-shadow: 0 0 20px rgba(120,160,255,0.15); }
+  .card:hover { border-color: #445; cursor: pointer; }
+  .card.selected:hover { border-color: #7aacff; }
+</style>
+</head>
+<body>
+<h1>Connection Line Styles &mdash; click to select</h1>
+<div class="grid" id="grid"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const styles = [
+  {
+    name: 'A — Tapered Tube (current)',
+    desc: 'Straight tube, thick middle tapering to thin ends. Matte surface, vertex-colored.',
+    id: 'tapered-tube'
+  },
+  {
+    name: 'B — Thin Glow Line',
+    desc: 'Single thin line with additive glow. No taper, uniform width, ethereal feel.',
+    id: 'thin-glow'
+  },
+  {
+    name: 'C — Segmented Strand',
+    desc: 'Dashed / fragmented line. Broken at regular intervals. Suggests data packets or pulses.',
+    id: 'segmented'
+  },
+  {
+    name: 'D — Multi-filament',
+    desc: '3-4 very thin parallel strands bunched together. Like optical fiber bundle.',
+    id: 'multi-filament'
+  },
+  {
+    name: 'E — Gradient Ribbon',
+    desc: 'Flat ribbon (billboarded) with width taper + opacity gradient. 2D but faces camera.',
+    id: 'ribbon'
+  },
+  {
+    name: 'F — Pure Additive Beam',
+    desc: 'Very thin bright core + wide soft glow halo. Like a laser beam in fog.',
+    id: 'beam'
+  },
+];
+
+const gridEl = document.getElementById('grid');
+
+styles.forEach((style, i) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<canvas></canvas><div class="meta"><h3>${style.name}</h3><p>${style.desc}</p></div>`;
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+  });
+  gridEl.appendChild(card);
+});
+
+// Select the first card by default
+setTimeout(() => gridEl.querySelector('.card').classList.add('selected'), 100);
+
+// --- Set up mini scenes in each canvas ---
+const canvases = document.querySelectorAll('canvas');
+
+// Two fixed endpoints
+const A = new THREE.Vector3(-2.5, 0, 0);
+const B = new THREE.Vector3(2.5, 0, 0);
+
+canvases.forEach((canvas, i) => {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#0c1018');
+
+  const camera = new THREE.PerspectiveCamera(40, 340/200, 0.1, 50);
+  camera.position.set(0, 0.3, 8);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(340, 200);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+
+  // Ambient
+  scene.add(new THREE.AmbientLight('#334466', 1.0));
+
+  // Two endpoint spheres (small, reference only)
+  [A, B].forEach(pt => {
+    const g = new THREE.SphereGeometry(0.18, 32, 32);
+    const m = new THREE.MeshPhysicalMaterial({
+      color: i === 0 ? '#e8c170' : '#7db8d4',
+      metalness: 0, roughness: 0.12,
+      transmission: 0.85, ior: 1.5, thickness: 0.36,
+    });
+    const mesh = new THREE.Mesh(g, m);
+    mesh.position.copy(pt);
+    scene.add(mesh);
+  });
+
+  const group = new THREE.Group();
+
+  switch (styles[i].id) {
+    case 'tapered-tube': {
+      const geo = createTaperedTube(A, B, new THREE.Color('#e8c170'), new THREE.Color('#7db8d4'), 0.1, 60, 12);
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.05, roughness: 0.55, depthWrite: true });
+      group.add(new THREE.Mesh(geo, mat));
+      // Core
+      const coreG = createCoreLine(A, B, '#ffffff', 0.03, 0.22, 0.78);
+      const coreM = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false });
+      group.add(new THREE.Mesh(coreG, coreM));
+      break;
+    }
+
+    case 'thin-glow': {
+      // Single thin line
+      const pts = [A.clone(), B.clone()];
+      const lineG = new THREE.BufferGeometry().setFromPoints(pts);
+      const lineM = new THREE.LineBasicMaterial({ color: '#c8c0e0', transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false });
+      group.add(new THREE.Line(lineG, lineM));
+      // Wide glow
+      const glowG = createGlowTube(A, B, 0.14);
+      const glowM = new THREE.ShaderMaterial({
+        uniforms: {}, vertexColors: true,
+        vertexShader: `varying vec3 vColor; attribute vec3 color; void main() { vColor = color; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: `varying vec3 vColor; void main() { gl_FragColor = vec4(vColor, 1.0); }`,
+        transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      group.add(new THREE.Mesh(glowG, glowM));
+      break;
+    }
+
+    case 'segmented': {
+      const segs = 12;
+      const segLen = A.distanceTo(B) / segs;
+      const dir = new THREE.Vector3().subVectors(B, A).normalize();
+      for (let s = 0; s < segs; s++) {
+        if (Math.random() < 0.25) continue; // some gaps
+        const t1 = s / segs;
+        const t2 = (s + 0.7) / segs;
+        const p1 = A.clone().add(dir.clone().multiplyScalar(A.distanceTo(B) * t1));
+        const p2 = A.clone().add(dir.clone().multiplyScalar(A.distanceTo(B) * t2));
+        const g = createTaperedTube(p1, p2, new THREE.Color('#c8b8e0'), new THREE.Color('#d0c0e8'), 0.06, 16, 8);
+        const m = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
+        group.add(new THREE.Mesh(g, m));
+      }
+      break;
+    }
+
+    case 'multi-filament': {
+      const dir = new THREE.Vector3().subVectors(B, A).normalize();
+      const perp = new THREE.Vector3(-dir.y, dir.x, dir.z * 0.3).normalize();
+      const perp2 = new THREE.Vector3().crossVectors(dir, perp).normalize();
+      for (let f = 0; f < 4; f++) {
+        const offset = perp.clone().multiplyScalar((f - 1.5) * 0.04).add(perp2.clone().multiplyScalar((Math.random()-0.5)*0.06));
+        const pts = [A.clone().add(offset), B.clone().add(offset)];
+        const lineG = new THREE.BufferGeometry().setFromPoints(pts);
+        const alpha = 0.3 + Math.random() * 0.3;
+        const lineM = new THREE.LineBasicMaterial({ color: '#c8c0e8', transparent: true, opacity: alpha, blending: THREE.AdditiveBlending, depthWrite: false });
+        group.add(new THREE.Line(lineG, lineM));
+      }
+      break;
+    }
+
+    case 'ribbon': {
+      // Flat ribbon that faces camera — simulated here with a thin box
+      const mid = new THREE.Vector3().addVectors(A, B).multiplyScalar(0.5);
+      const len = A.distanceTo(B);
+      const dir = new THREE.Vector3().subVectors(B, A).normalize();
+      const ribbonG = new THREE.BoxGeometry(len, 0.12, 0.015);
+      const ribbonM = new THREE.MeshBasicMaterial({ color: '#c8b8e0', transparent: true, opacity: 0.55, depthWrite: true });
+      const ribbon = new THREE.Mesh(ribbonG, ribbonM);
+      ribbon.position.copy(mid);
+      ribbon.lookAt(B);
+      group.add(ribbon);
+      break;
+    }
+
+    case 'beam': {
+      // Wide soft glow
+      const glowG = createGlowTube(A, B, 0.22);
+      const glowM = new THREE.ShaderMaterial({
+        uniforms: {},
+        vertexShader: `varying float vAlpha; attribute float alpha; void main() { vAlpha = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: `varying float vAlpha; void main() { float a = vAlpha * 0.25; gl_FragColor = vec4(0.78, 0.74, 0.90, a); }`,
+        transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      group.add(new THREE.Mesh(glowG, glowM));
+      // Thin bright core
+      const coreG = createCoreLineWithAlpha(A, B, 0.02);
+      const coreM = new THREE.ShaderMaterial({
+        uniforms: {},
+        vertexShader: `varying float vAlpha; attribute float alpha; void main() { vAlpha = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: `varying float vAlpha; void main() { gl_FragColor = vec4(1.0, 1.0, 1.0, vAlpha * 0.8); }`,
+        transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      group.add(new THREE.Mesh(coreG, coreM));
+      break;
+    }
+  }
+
+  scene.add(group);
+
+  // Gentle auto-rotate
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.6;
+  controls.enableZoom = false;
+  controls.enablePan = false;
+
+  function anim() {
+    requestAnimationFrame(anim);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  anim();
+});
+
+// --- Shared geometry helpers ---
+function createTaperedTube(p1, p2, c1, c2, radiusMid, segments, ringSegments) {
+  const dir = new THREE.Vector3().subVectors(p2, p1);
+  const len = dir.length();
+  dir.normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  if (Math.abs(dir.dot(up)) > 0.999) up.set(1, 0, 0);
+  const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+  const forward = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const pos = [], cols = [], idx = [], nml = [];
+
+  function radiusAt(t) {
+    const sigma = 0.28;
+    const gauss = Math.exp(-((t - 0.5) * (t - 0.5)) / (2 * sigma * sigma));
+    return radiusMid * (0.12 + 0.88 * gauss);
+  }
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const center = p1.clone().add(dir.clone().multiplyScalar(t * len));
+    const r = radiusAt(t);
+    const mc = c1.clone().lerp(c2, t);
+    const ta = Math.sin(t * Math.PI);
+    const df = 0.15 + ta * 0.85;
+    for (let j = 0; j < ringSegments; j++) {
+      const angle = (j / ringSegments) * Math.PI * 2;
+      pos.push(center.x + right.x*Math.cos(angle)*r + forward.x*Math.sin(angle)*r, center.y + right.y*Math.cos(angle)*r + forward.y*Math.sin(angle)*r, center.z + right.z*Math.cos(angle)*r + forward.z*Math.sin(angle)*r);
+      cols.push(mc.r*df, mc.g*df, mc.b*df);
+      nml.push(right.x*Math.cos(angle) + forward.x*Math.sin(angle), right.y*Math.cos(angle) + forward.y*Math.sin(angle), right.z*Math.cos(angle) + forward.z*Math.sin(angle));
+    }
+  }
+  for (let i = 0; i < segments; i++)
+    for (let j = 0; j < ringSegments; j++) {
+      const a = i*ringSegments+j, b = i*ringSegments+((j+1)%ringSegments), c = (i+1)*ringSegments+j, d = (i+1)*ringSegments+((j+1)%ringSegments);
+      idx.push(a,b,c); idx.push(b,d,c);
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nml, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+
+function createCoreLine(p1, p2, colorHex, radiusMid, tStart, tEnd) {
+  return createCoreLineWithAlpha(p1, p2, radiusMid, tStart, tEnd);
+}
+
+function createCoreLineWithAlpha(p1, p2, radiusMax, tStart, tEnd) {
+  if (!tStart) tStart = 0.22;
+  if (!tEnd) tEnd = 0.78;
+  const fullDir = new THREE.Vector3().subVectors(p2, p1);
+  const totalLen = fullDir.length();
+  fullDir.normalize();
+  const cp1 = p1.clone().add(fullDir.clone().multiplyScalar(totalLen * tStart));
+  const cp2 = p1.clone().add(fullDir.clone().multiplyScalar(totalLen * tEnd));
+  const dir = new THREE.Vector3().subVectors(cp2, cp1);
+  const len = dir.length();
+  dir.normalize();
+  const up = new THREE.Vector3(0,1,0);
+  if (Math.abs(dir.dot(up)) > 0.999) up.set(1,0,0);
+  const r2 = new THREE.Vector3().crossVectors(dir, up).normalize();
+  const f2 = new THREE.Vector3().crossVectors(r2, dir).normalize();
+  const segs = 20, rings = 8;
+  const pos = [], cols = [], idx = [], alphas = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const center = cp1.clone().add(dir.clone().multiplyScalar(t * len));
+    const rad = radiusMax * Math.sin(t * Math.PI);
+    const a = Math.sin(t * Math.PI);
+    for (let j = 0; j < rings; j++) {
+      const angle = (j/rings)*Math.PI*2;
+      pos.push(center.x+r2.x*Math.cos(angle)*rad+f2.x*Math.sin(angle)*rad, center.y+r2.y*Math.cos(angle)*rad+f2.y*Math.sin(angle)*rad, center.z+r2.z*Math.cos(angle)*rad+f2.z*Math.sin(angle)*rad);
+      cols.push(1,1,1);
+      alphas.push(a);
+    }
+  }
+  for (let i=0;i<segs;i++)
+    for (let j=0;j<rings;j++) {
+      const a=i*rings+j, b=i*rings+((j+1)%rings), c=(i+1)*rings+j, d=(i+1)*rings+((j+1)%rings);
+      idx.push(a,b,c); idx.push(b,d,c);
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  g.setAttribute('alpha', new THREE.Float32BufferAttribute(alphas, 1));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+function createGlowTube(p1, p2, radius) {
+  const dir = new THREE.Vector3().subVectors(p2, p1);
+  const len = dir.length();
+  dir.normalize();
+  const up = new THREE.Vector3(0,1,0);
+  if (Math.abs(dir.dot(up)) > 0.999) up.set(1,0,0);
+  const r2 = new THREE.Vector3().crossVectors(dir, up).normalize();
+  const f2 = new THREE.Vector3().crossVectors(r2, dir).normalize();
+  const segs = 30, rings = 8;
+  const pos = [], cols = [], idx = [], alphas = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const center = p1.clone().add(dir.clone().multiplyScalar(t * len));
+    const a = Math.sin(t * Math.PI);
+    const r = radius * a;
+    for (let j = 0; j < rings; j++) {
+      const angle = (j/rings)*Math.PI*2;
+      pos.push(center.x+r2.x*Math.cos(angle)*r+f2.x*Math.sin(angle)*r, center.y+r2.y*Math.cos(angle)*r+f2.y*Math.sin(angle)*r, center.z+r2.z*Math.cos(angle)*r+f2.z*Math.sin(angle)*r);
+      cols.push(0.8,0.75,0.9);
+      alphas.push(a);
+    }
+  }
+  for (let i=0;i<segs;i++)
+    for (let j=0;j<rings;j++) {
+      const a=i*rings+j, b=i*rings+((j+1)%rings), c=(i+1)*rings+j, d=(i+1)*rings+((j+1)%rings);
+      idx.push(a,b,c); idx.push(b,d,c);
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  g.setAttribute('alpha', new THREE.Float32BufferAttribute(alphas, 1));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+</script>
+</body>
+</html>

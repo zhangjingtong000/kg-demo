@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Knowledge Graph — Three.js</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #080c12; overflow: hidden; height: 100vh; font-family: "Inter","PingFang SC",system-ui,sans-serif; }
+  canvas { display: block; }
+  .node-label { color: rgba(255,255,255,0.85); font-size: 11px; letter-spacing: 0.03em; pointer-events: none; text-shadow: 0 0 8px rgba(0,0,0,0.8); white-space: nowrap; transition: all 0.3s ease; }
+  .node-label.focused { color: #fff; font-size: 13px; text-shadow: 0 0 14px rgba(150,180,255,0.9); }
+  .hint { position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.3); font-size: 11px; letter-spacing: 0.04em; pointer-events: none; }
+  .focus-indicator { position: absolute; top: 28px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.5); font-size: 13px; letter-spacing: 0.05em; pointer-events: none; opacity: 0; transition: opacity 0.4s; }
+  .focus-indicator.visible { opacity: 1; }
+  .focus-indicator span { color: #aac8ff; }
+</style>
+</head>
+<body>
+<div class="hint">drag to rotate | scroll to zoom | click node to focus | drag node to move</div>
+<div class="focus-indicator" id="focusLabel">focused on <span></span> &mdash; click empty space to unfocus</div>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#080c12');
+scene.fog = new THREE.FogExp2('#080c12', 0.00006);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.5, 200);
+camera.position.set(18, 10, 22);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0px';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.body.appendChild(labelRenderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.minDistance = 4; controls.maxDistance = 60;
+controls.target.set(0, 0, 0);
+controls.autoRotate = true; controls.autoRotateSpeed = 0.3;
+
+scene.add(new THREE.AmbientLight('#334466', 1.2));
+const key = new THREE.DirectionalLight('#ffffff', 2.5); key.position.set(20, 30, 15); scene.add(key);
+const rim = new THREE.DirectionalLight('#8899cc', 1.5); rim.position.set(-15, -5, -10); scene.add(rim);
+const fill = new THREE.DirectionalLight('#445577', 0.8); fill.position.set(0, -5, 15); scene.add(fill);
+
+const starsGeo = new THREE.BufferGeometry();
+const N_STARS = 600, starPos = new Float32Array(N_STARS*3);
+for (let i=0;i<N_STARS;i++) { starPos[i*3]=(Math.random()-0.5)*60; starPos[i*3+1]=(Math.random()-0.5)*40; starPos[i*3+2]=(Math.random()-0.5)*50; }
+starsGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const stars = new THREE.Points(starsGeo, new THREE.PointsMaterial({ color:'#667799', size:0.04, blending:THREE.AdditiveBlending, depthWrite:false, transparent:true, opacity:0.7 }));
+scene.add(stars);
+
+// --- Graph ---
+const graphData = [
+  { pos:[-8,6,-3],   r:0.60, color:'#e8c170', label:'Deadlift' },
+  { pos:[-5,9,2],    r:0.55, color:'#7db8d4', label:'Hip Flexor' },
+  { pos:[-1,11,-4],  r:0.62, color:'#c9a0dc', label:'Core Stability' },
+  { pos:[4,10,1],    r:0.50, color:'#88c9a0', label:'Shoulder Press' },
+  { pos:[9,7,3],     r:0.64, color:'#e8a870', label:'Bench Press' },
+  { pos:[8,2,-4],    r:0.56, color:'#d4a0b0', label:'Triceps' },
+  { pos:[5,-3,5],    r:0.48, color:'#90b0d8', label:'Biceps Curl' },
+  { pos:[-1,-6,1],   r:0.66, color:'#c0b890', label:'Squat' },
+  { pos:[-8,-2,6],   r:0.58, color:'#a8c8b0', label:'Quadriceps' },
+  { pos:[-11,2,-3],  r:0.52, color:'#d0b8c8', label:'Lower Back' },
+  { pos:[-4,-1,-8],  r:0.60, color:'#b8c0d8', label:'Glutes' },
+  { pos:[7,-6,-2],   r:0.54, color:'#c8b8a0', label:'Hamstrings' },
+  { pos:[-5,4,9],    r:0.50, color:'#a0c0c8', label:'Lat Pulldown' },
+  { pos:[3,2,10],    r:0.56, color:'#c8a8b8', label:'Romanian DL' },
+  { pos:[-9,-6,-5],  r:0.46, color:'#98b8c8', label:'Calves' },
+  { pos:[11,-2,7],   r:0.58, color:'#e8d488', label:'Overhead Press' },
+  { pos:[-11,8,6],   r:0.52, color:'#c0a0e0', label:'Pull-up' },
+  { pos:[0,-10,-3],  r:0.62, color:'#d8c090', label:'Leg Press' },
+  { pos:[12,1,-7],   r:0.54, color:'#e0a8b0', label:'Chest Fly' },
+  { pos:[-6,-9,7],   r:0.50, color:'#b8d0c0', label:'Lunges' },
+  { pos:[8,8,8],     r:0.48, color:'#d0c8e8', label:'Face Pull' },
+  { pos:[-9,-1,11],  r:0.56, color:'#e8c888', label:'Hip Thrust' },
+  { pos:[1,7,-11],   r:0.58, color:'#c8b0d0', label:'Plank' },
+  { pos:[10,-9,0],   r:0.52, color:'#a8d8c8', label:'Calf Raise' },
+  { pos:[-13,-4,8],  r:0.48, color:'#d8b8a0', label:'Good Morning' },
+  { pos:[5,5,-10],   r:0.54, color:'#b8a8d8', label:'Russian Twist' },
+];
+
+const edges = [
+  [0,1],[0,9],[0,10],[0,14],[1,2],[2,3],[2,16],[3,4],[4,5],[4,20],
+  [5,6],[6,7],[7,8],[7,17],[8,9],[10,7],[10,11],[11,23],[5,12],[6,12],
+  [8,12],[11,14],[9,14],[3,13],[13,5],[12,21],[12,14],[1,8],[10,14],
+  [15,4],[15,18],[15,5],[16,3],[16,20],[17,7],[17,11],[17,14],
+  [8,19],[19,11],[19,14],[19,17],[0,25],[1,21],[2,22],[3,24],[4,23],
+  [5,18],[6,20],[20,16],[21,13],[21,25],[22,16],[22,17],[7,23],[23,18],
+  [23,10],[24,9],[24,8],[24,17],[25,12],[25,22],[25,0],[10,24],[11,19],[15,20],
+];
+
+// Shared adjacency
+const adjMap = new Map();
+edges.forEach(([a,b]) => { if(!adjMap.has(a))adjMap.set(a,[]); if(!adjMap.has(b))adjMap.set(b,[]); adjMap.get(a).push(b); adjMap.get(b).push(a); });
+
+// --- Geometry helpers ---
+function createGlowBeam(p1, p2, c1, c2, radiusMid, segments) {
+  const dir = new THREE.Vector3().subVectors(p2, p1); const len = dir.length(); dir.normalize();
+  const up = new THREE.Vector3(0,1,0); if (Math.abs(dir.dot(up))>0.999) up.set(1,0,0);
+  const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+  const forward = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const rings = 6, pos = [], cols = [], idx = [], nml = [];
+  for (let i=0;i<=segments;i++) {
+    const t=i/segments, center=p1.clone().add(dir.clone().multiplyScalar(t*len));
+    const r=radiusMid*(0.78+0.22*Math.sin(t*Math.PI));
+    const mc=c1.clone().lerp(c2,t), b=Math.sin(t*Math.PI);
+    for (let j=0;j<rings;j++) {
+      const a=(j/rings)*Math.PI*2;
+      pos.push(center.x+right.x*Math.cos(a)*r+forward.x*Math.sin(a)*r, center.y+right.y*Math.cos(a)*r+forward.y*Math.sin(a)*r, center.z+right.z*Math.cos(a)*r+forward.z*Math.sin(a)*r);
+      cols.push(mc.r*b, mc.g*b, mc.b*b);
+      nml.push(right.x*Math.cos(a)+forward.x*Math.sin(a), right.y*Math.cos(a)+forward.y*Math.sin(a), right.z*Math.cos(a)+forward.z*Math.sin(a));
+    }
+  }
+  for (let i=0;i<segments;i++) for (let j=0;j<rings;j++) { const a=i*rings+j,b=i*rings+((j+1)%rings),c=(i+1)*rings+j,d=(i+1)*rings+((j+1)%rings); idx.push(a,b,c); idx.push(b,d,c); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nml,3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+
+// --- Node meshes + labels ---
+const nodeMeshes = [], nodeLabels = [];
+const nodeGroup = new THREE.Group(), labelGroup = new THREE.Group();
+
+graphData.forEach((data, idx) => {
+  const { pos, r, color } = data;
+  const col = new THREE.Color(color);
+  const hsl = {}; col.getHSL(hsl);
+  const glassColor = new THREE.Color().setHSL(hsl.h, hsl.s*0.6, Math.min(1, hsl.l*1.35));
+
+  const geo = new THREE.SphereGeometry(r, 64, 64);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: glassColor },
+      uLightDir: { value: new THREE.Vector3(0.55,0.7,0.4).normalize() },
+      uLightDir2: { value: new THREE.Vector3(-0.3,-0.15,-0.35).normalize() },
+      uCameraPos: { value: new THREE.Vector3() },
+      uHover: { value: 0 },
+    },
+    vertexShader: `varying vec3 vWPos,vWNormal;void main(){vec4 wp=modelMatrix*vec4(position,1.0);vWPos=wp.xyz;vWNormal=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader: `varying vec3 vWPos,vWNormal;uniform vec3 uColor,uLightDir,uLightDir2,uCameraPos;uniform float uHover;
+void main(){vec3 N=normalize(vWNormal),V=normalize(uCameraPos-vWPos);float f=pow(1.0-abs(dot(V,N)),3.5);
+vec3 H1=normalize(uLightDir+V),H2=normalize(uLightDir2+V);float s1=pow(max(dot(N,H1),0.0),180.0),s2=pow(max(dot(N,H2),0.0),80.0);
+float d=max(dot(N,uLightDir),0.0)*0.25+0.1,hb=1.0+uHover*0.5;
+vec3 body=uColor*(d+0.35)*hb;float ba=0.12*hb;
+vec3 edge=uColor*2.2*f*hb;float ea=f*0.40*hb;
+float sp=s1*0.85+s2*0.45;
+vec3 col=body+edge+sp*vec3(1.0);float alpha=clamp(ba+ea+sp*0.85,0.0,1.0);
+gl_FragColor=vec4(col,alpha);}`,
+    transparent: true, depthWrite: true,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(pos[0], pos[1], pos[2]);
+
+  const glowGeo = new THREE.SphereGeometry(r*1.9, 32, 32);
+  const glowMat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: col.clone() } },
+    vertexShader: `varying vec3 vN,vP;void main(){vec4 wp=modelMatrix*vec4(position,1.0);vP=wp.xyz;vN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader: `varying vec3 vN,vP;uniform vec3 uColor;void main(){vec3 V=normalize(cameraPosition-vP);float f=1.0-abs(dot(V,vN));gl_FragColor=vec4(uColor,f*f*0.22);}`,
+    transparent: true, depthWrite: false,
+  });
+  mesh.add(new THREE.Mesh(glowGeo, glowMat));
+  mesh.userData = { idx };
+
+  nodeGroup.add(mesh);
+  nodeMeshes.push({ mesh, data, idx });
+
+  const labelDiv = document.createElement('div');
+  labelDiv.className = 'node-label'; labelDiv.textContent = data.label;
+  const labelObj = new CSS2DObject(labelDiv);
+  labelObj.position.set(pos[0], pos[1]+r+0.45, pos[2]);
+  labelGroup.add(labelObj);
+  nodeLabels.push(labelObj);
+});
+scene.add(nodeGroup); scene.add(labelGroup);
+
+// --- Connections: pre-built, updated in-place (no per-frame rebuild) ---
+const connectionsGroup = new THREE.Group();
+const edgeObjects = []; // { main, core, from, to }
+
+function createEdgeMeshes(p1, p2, c1, c2) {
+  const mg = createGlowBeam(p1,p2,c1,c2,0.022,40);
+  const main = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:0.5, blending:THREE.AdditiveBlending, depthWrite:false }));
+  const cg = createGlowBeam(p1,p2,c1,c2,0.032,30);
+  const core = new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:0.3, blending:THREE.AdditiveBlending, depthWrite:false }));
+  return { main, core };
+}
+
+function updateEdgeGeometry(mesh, p1, p2, c1, c2, radiusMid, segments) {
+  const dir = new THREE.Vector3().subVectors(p2, p1); const len = dir.length(); dir.normalize();
+  const up = new THREE.Vector3(0,1,0); if (Math.abs(dir.dot(up))>0.999) up.set(1,0,0);
+  const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+  const forward = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const rings = 6;
+  const posArr = mesh.geometry.attributes.position.array;
+  const colArr = mesh.geometry.attributes.color.array;
+  for (let i=0;i<=segments;i++) {
+    const t=i/segments, center=p1.clone().add(dir.clone().multiplyScalar(t*len));
+    const r=radiusMid*(0.78+0.22*Math.sin(t*Math.PI));
+    const mc=c1.clone().lerp(c2,t), b=Math.sin(t*Math.PI);
+    for (let j=0;j<rings;j++) {
+      const a=(j/rings)*Math.PI*2;
+      const vi = (i*rings+j)*3;
+      posArr[vi]=center.x+right.x*Math.cos(a)*r+forward.x*Math.sin(a)*r;
+      posArr[vi+1]=center.y+right.y*Math.cos(a)*r+forward.y*Math.sin(a)*r;
+      posArr[vi+2]=center.z+right.z*Math.cos(a)*r+forward.z*Math.sin(a)*r;
+      colArr[vi]=mc.r*b; colArr[vi+1]=mc.g*b; colArr[vi+2]=mc.b*b;
+    }
+  }
+  mesh.geometry.attributes.position.needsUpdate = true;
+  mesh.geometry.attributes.color.needsUpdate = true;
+}
+
+// Build once
+edges.forEach(([from, to]) => {
+  const p1 = nodeMeshes[from].mesh.position.clone(), p2 = nodeMeshes[to].mesh.position.clone();
+  const c1 = new THREE.Color(graphData[from].color), c2 = new THREE.Color(graphData[to].color);
+  const objs = createEdgeMeshes(p1, p2, c1, c2);
+  connectionsGroup.add(objs.main); connectionsGroup.add(objs.core);
+  edgeObjects.push({ ...objs, from, to });
+});
+scene.add(connectionsGroup);
+
+function refreshEdgePositions() {
+  edgeObjects.forEach(eo => {
+    const p1 = nodeMeshes[eo.from].mesh.position, p2 = nodeMeshes[eo.to].mesh.position;
+    const c1 = new THREE.Color(graphData[eo.from].color), c2 = new THREE.Color(graphData[eo.to].color);
+    updateEdgeGeometry(eo.main, p1, p2, c1, c2, 0.022, 40);
+    updateEdgeGeometry(eo.core, p1, p2, c1, c2, 0.032, 30);
+  });
+}
+
+function setEdgeHighlight(hoveredIdx) {
+  edgeObjects.forEach(eo => {
+    const on = hoveredIdx===null || eo.from===hoveredIdx || eo.to===hoveredIdx;
+    eo.main.material.opacity = on ? 0.5 : 0.06;
+    eo.core.material.opacity = on ? 0.3 : 0.03;
+  });
+}
+
+const ring = new THREE.Mesh(new THREE.TorusGeometry(7,0.015,16,100), new THREE.MeshBasicMaterial({ color:'#334455', transparent:true, opacity:0.2, depthWrite:false }));
+ring.rotation.x = Math.PI/2; scene.add(ring);
+
+// --- State ---
+let focusedIdx = null;
+let hoveredIdx = null;
+const origPos = graphData.map(d => new THREE.Vector3(...d.pos));
+let targets = origPos.map(p => p.clone());
+
+// Spring-back state
+let restPositions = origPos.map(p => p.clone()); // where nodes want to return
+let springVels = graphData.map(() => new THREE.Vector3()); // velocities for spring-back
+let springActive = false;
+const SPRING_K = 8, SPRING_DAMP = 0.7;
+let dirty = false;
+let didDrag = false; // true if mousemove happened during drag → suppresses click
+const cameraTarget = new THREE.Vector3(18, 10, 22);
+const defaultCam = new THREE.Vector3(18, 10, 22);
+const focusCam = new THREE.Vector3(0, 14, 16);
+
+function bfs(startIdx) {
+  const dist = new Map(), q = [startIdx]; dist.set(startIdx, 0);
+  while (q.length) { const u=q.shift(); for(const v of(adjMap.get(u)||[])) if(!dist.has(v)){ dist.set(v,dist.get(u)+1); q.push(v); } }
+  return dist;
+}
+
+function radialLayout(focusIdx) {
+  const dist = bfs(focusIdx), radii = [0,5,9.5,14], rings = [[],[],[],[]];
+  for (let i=0;i<graphData.length;i++) { const d=dist.has(i)?Math.min(dist.get(i),3):3; rings[d].push(i); }
+  const t = new Array(graphData.length);
+  for (let d=0;d<=3;d++) rings[d].forEach((ni,k) => {
+    const ang=(k/rings[d].length)*Math.PI*2+d*0.5;
+    t[ni]=new THREE.Vector3(Math.cos(ang)*radii[d]+(Math.random()-0.5)*0.8, (d-1.2)*2.2+(Math.random()-0.5)*1.2, Math.sin(ang)*radii[d]+(Math.random()-0.5)*0.8);
+  });
+  t[focusIdx].set(0,0,0);
+  return t;
+}
+
+function updateLabels() {
+  nodeLabels.forEach((lbl,i) => {
+    const m=nodeMeshes[i].mesh, r=graphData[i].r;
+    lbl.position.set(m.position.x, m.position.y+r+0.45, m.position.z);
+    lbl.element.classList.toggle('focused', i===focusedIdx);
+  });
+}
+
+// --- Interaction ---
+const raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let dragNode = null, dragPlane = new THREE.Plane(), dragOffset = new THREE.Vector3();
+let hoverTimeout = null;
+function getMeshes(){ return nodeMeshes.map(n=>n.mesh); }
+
+function findHitNode(e) {
+  mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-(e.clientY/innerHeight)*2+1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(getMeshes(), false);
+  return (hits.length>0 && hits[0].object.userData.idx!==undefined) ? hits[0] : null;
+}
+
+renderer.domElement.addEventListener('mousemove', (e) => {
+  if (dragNode) {
+    // --- Drag: move node + nudge connected nodes with decay ---
+    mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-(e.clientY/innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    const pt = new THREE.Vector3(); raycaster.ray.intersectPlane(dragPlane, pt);
+    if (pt) {
+      const newPos = pt.clone().sub(dragOffset);
+      const idx = dragNode.userData.idx;
+      const delta = newPos.clone().sub(dragNode.position);
+      dragNode.position.copy(newPos);
+      targets[idx].copy(newPos);
+      didDrag = true; // actual movement → suppress click
+
+      // Nudge connected nodes (only targets, not origPos)
+      const dist = bfs(idx);
+      nodeMeshes.forEach(({ mesh }, i) => {
+        if (i === idx) return;
+        const d = dist.has(i) ? dist.get(i) : 999;
+        if (d > 3) return;
+        const decay = Math.pow(0.35, d);
+        mesh.position.x += delta.x * decay;
+        mesh.position.y += delta.y * decay;
+        mesh.position.z += delta.z * decay;
+        targets[i].copy(mesh.position);
+      });
+      dirty = true;
+    }
+  } else {
+    // --- Hover highlight (debounced) ---
+    const hit = findHitNode(e);
+    const targetIdx = hit ? hit.object.userData.idx : null;
+    if (targetIdx !== hoveredIdx) {
+      clearTimeout(hoverTimeout);
+      if (targetIdx === null) {
+        // Leaving immediately clears highlight
+        hoveredIdx = null;
+        setEdgeHighlight(null);
+        nodeMeshes.forEach(({ mesh }) => {
+          if (mesh.children.length>0) mesh.children[0].visible = true;
+          if (mesh.material.uniforms) mesh.material.uniforms.uHover.value = 0;
+        });
+      } else {
+        // Entering: delay 150ms before showing highlight
+        hoverTimeout = setTimeout(() => {
+          hoveredIdx = targetIdx;
+          setEdgeHighlight(hoveredIdx);
+          const neighborSet = new Set([hoveredIdx, ...(adjMap.get(hoveredIdx)||[])]);
+          nodeMeshes.forEach(({ mesh }, i) => {
+            const on = neighborSet.has(i);
+            if (mesh.children.length>0) mesh.children[0].visible = on;
+            if (mesh.material.uniforms) mesh.material.uniforms.uHover.value = (i===hoveredIdx) ? 1 : 0;
+          });
+        }, 150);
+      }
+    }
+  }
+});
+
+renderer.domElement.addEventListener('mouseup', () => {
+  if (dragNode) {
+    dragNode = null; controls.enabled = true;
+    springActive = true; // start spring-back after drag release
+    springVels.forEach(v => v.set(0,0,0));
+  }
+});
+
+renderer.domElement.addEventListener('mouseleave', () => {
+  if (dragNode) { dragNode = null; controls.enabled = true; }
+  clearTimeout(hoverTimeout);
+  if (hoveredIdx !== null) {
+    hoveredIdx = null;
+    setEdgeHighlight(null);
+    nodeMeshes.forEach(({ mesh }) => {
+      if (mesh.children.length>0) mesh.children[0].visible = true;
+      if (mesh.material.uniforms && mesh.material.uniforms.uHover) mesh.material.uniforms.uHover.value = 0;
+    });
+  }
+});
+
+// --- Click (separate from drag & orbit) ---
+let mouseDownPos = new THREE.Vector2();
+
+renderer.domElement.addEventListener('click', (e) => {
+  const mdx = e.clientX - mouseDownPos.x, mdy = e.clientY - mouseDownPos.y;
+  if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy) > 3) return; // was a drag or orbit
+  const hit = findHitNode(e);
+  if (hit) {
+    springActive = false; // cancel any spring-back
+    focusedIdx = hit.object.userData.idx;
+    targets = radialLayout(focusedIdx);
+    cameraTarget.copy(focusCam);
+  } else {
+    springActive = false;
+    focusedIdx = null;
+    targets = origPos.map(p=>p.clone());
+    cameraTarget.copy(defaultCam);
+  }
+  dirty = true;
+  const el=document.getElementById('focusLabel'), sp=el.querySelector('span');
+  if (focusedIdx!==null){ sp.textContent=graphData[focusedIdx].label; el.classList.add('visible'); }
+  else el.classList.remove('visible');
+  updateLabels();
+});
+
+renderer.domElement.addEventListener('mousedown', (e) => {
+  mouseDownPos.set(e.clientX, e.clientY);
+  const hit = findHitNode(e);
+  if (hit) {
+    dragNode = hit.object;
+    didDrag = false;
+    springActive = false; // stop any ongoing spring-back
+    // Save current positions as rest — nodes will spring back here
+    nodeMeshes.forEach(({mesh},i) => restPositions[i].copy(mesh.position));
+    controls.enabled = false;
+    const normal = camera.getWorldDirection(new THREE.Vector3()).clone();
+    dragPlane.set(normal, -dragNode.position.dot(normal));
+    raycaster.setFromCamera(mouse, camera);
+    const pt = new THREE.Vector3(); raycaster.ray.intersectPlane(dragPlane, pt);
+    dragOffset.copy(pt).sub(dragNode.position);
+  }
+});
+
+// --- Render ---
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(),0.1), elapsed = performance.now()*0.001;
+  controls.update();
+
+  let moving = false;
+
+  // Spring-back: pull nodes toward restPositions with underdamped spring
+  if (springActive && !dragNode) {
+    let settled = true;
+    nodeMeshes.forEach(({ mesh }, i) => {
+      const dx = restPositions[i].x - mesh.position.x;
+      const dy = restPositions[i].y - mesh.position.y;
+      const dz = restPositions[i].z - mesh.position.z;
+      const dist = Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if (dist > 0.005 || springVels[i].length() > 0.005) settled = false;
+      // Spring force: F = -k * displacement
+      springVels[i].x += dx * SPRING_K * dt;
+      springVels[i].y += dy * SPRING_K * dt;
+      springVels[i].z += dz * SPRING_K * dt;
+      springVels[i].multiplyScalar(SPRING_DAMP);
+      mesh.position.x += springVels[i].x * dt;
+      mesh.position.y += springVels[i].y * dt;
+      mesh.position.z += springVels[i].z * dt;
+      targets[i].copy(mesh.position);
+    });
+    if (settled) { springActive = false; springVels.forEach(v => v.set(0,0,0)); }
+    moving = true;
+  }
+  // Normal movement (lerp to targets when focused or not springing)
+  else if (!springActive) {
+    nodeMeshes.forEach(({ mesh }, i) => {
+      if (dragNode && mesh === dragNode) { moving = true; return; }
+      const t=targets[i], dx=t.x-mesh.position.x, dy=t.y-mesh.position.y, dz=t.z-mesh.position.z;
+      const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if (dist>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
+    });
+  }
+
+  if (moving||dirty) { refreshEdgePositions(); updateLabels(); dirty=false; }
+
+  camera.position.lerp(cameraTarget, 1.5*dt);
+  controls.target.lerp(focusedIdx!==null ? nodeMeshes[focusedIdx].mesh.position : new THREE.Vector3(0,0,0), 2.5*dt);
+
+  nodeMeshes.forEach(({ mesh }) => { if(mesh.material.uniforms) mesh.material.uniforms.uCameraPos.value.copy(camera.position); });
+  stars.rotation.y += dt*0.015; stars.rotation.x += dt*0.008;
+
+  nodeMeshes.forEach(({ mesh }, i) => {
+    const tgt=(i===focusedIdx)?1.45:1.0, cur=mesh.scale.x;
+    mesh.scale.setScalar(cur+(tgt-cur)*4.0*dt);
+  });
+  if (focusedIdx!==null) { const fm=nodeMeshes[focusedIdx].mesh, p=1+Math.sin(elapsed*4.0)*0.04; fm.scale.setScalar(fm.scale.x+(p-fm.scale.x)*0.3); }
+
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); labelRenderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Scheme C — Force Always On + Focus Node Pinned at Center</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#080c12;overflow:hidden;height:100vh;font-family:Inter,system-ui,sans-serif}canvas{display:block}
+.h{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.3);font-size:11px;letter-spacing:.04em;pointer-events:none}
+</style></head><body>
+<div class="h" id="m">FREE MODE — drag nodes | click node to FOCUS (pinned at center) | click empty to unfocus</div>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+// --- Setup ---
+const S=new THREE.Scene();S.background=new THREE.Color('#080c12');S.fog=new THREE.FogExp2('#080c12',.00006);
+const C=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.5,200);C.position.set(12,8,16);
+const R=new THREE.WebGLRenderer({antialias:true});R.setSize(innerWidth,innerHeight);R.setPixelRatio(Math.min(devicePixelRatio,2));R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.15;document.body.appendChild(R.domElement);
+const ctrl=new OrbitControls(C,R.domElement);ctrl.enableDamping=true;ctrl.dampingFactor=.08;ctrl.minDistance=4;ctrl.maxDistance=40;ctrl.autoRotate=true;ctrl.autoRotateSpeed=.3;
+S.add(new THREE.AmbientLight('#334466',1.2));const kl=new THREE.DirectionalLight('#ffffff',2.5);kl.position.set(20,30,15);S.add(kl);S.add(new THREE.DirectionalLight('#8899cc',1.5));S.add(new THREE.DirectionalLight('#445577',.8));
+
+// --- Same data ---
+const NODES=[{p:[0,4,0],r:.55,c:'#e8c170',n:'Squat'},{p:[2,2,2],r:.48,c:'#c0b890',n:'Deadlift'},{p:[4,0,-1],r:.5,c:'#e8a870',n:'Bench Press'},{p:[-2,3,-2],r:.45,c:'#7db8d4',n:'Quadriceps'},{p:[-3.5,0,3],r:.42,c:'#c8b8a0',n:'Hamstrings'},{p:[1,-2,-3],r:.5,c:'#b8c0d8',n:'Glutes'},{p:[-5,1,-1],r:.4,c:'#d0b8c8',n:'Lower Back'},{p:[3,4,3],r:.44,c:'#c9a0dc',n:'Core'},{p:[5,2,2],r:.42,c:'#88c9a0',n:'Shoulders'},{p:[3.5,-2,3],r:.38,c:'#d4a0b0',n:'Triceps'},{p:[1,-4,1],r:.36,c:'#90b0d8',n:'Biceps'},{p:[-1,-4,-2],r:.4,c:'#a0c0c8',n:'Lats'}];
+const EDGES=[[0,1],[0,3],[0,4],[0,5],[0,6],[1,2],[1,6],[2,8],[2,9],[3,4],[3,6],[5,6],[5,11],[7,2],[7,8],[10,9]];
+
+// --- Force Sim (same as A/B) ---
+let nodes=[],edges=[];
+function initSim(){
+  nodes=NODES.map((d,i)=>({pos:new THREE.Vector3(...d.p),vel:new THREE.Vector3(),pinned:false,idx:i}));
+  edges=EDGES.map(([f,t])=>({from:nodes[f],to:nodes[t],restLen:new THREE.Vector3().subVectors(nodes[f].pos,nodes[t].pos).length()}));
+}
+initSim();
+const springK=.15,repK=2.5,damp=.92,centerK=.03,dt=.016,MAX_F=.3;
+
+function simStep(){
+  edges.forEach(e=>{const d=new THREE.Vector3().subVectors(e.to.pos,e.from.pos);const l=d.length()||.001;const f=Math.max(-MAX_F,Math.min(MAX_F,springK*(l-e.restLen)));d.normalize().multiplyScalar(f);e.from.vel.add(d.clone().multiplyScalar(-1));e.to.vel.add(d);});
+  for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){const d=new THREE.Vector3().subVectors(nodes[j].pos,nodes[i].pos);const l=d.length()||.001;const f=Math.min(MAX_F,repK/(l*l));d.normalize().multiplyScalar(f);nodes[i].vel.add(d.clone().multiplyScalar(-1));nodes[j].vel.add(d);}
+  nodes.forEach(n=>{if(n.pinned)return;n.vel.add(n.pos.clone().multiplyScalar(-centerK));n.vel.multiplyScalar(damp);n.pos.add(n.vel.clone().multiplyScalar(dt));});
+}
+
+// --- Glass shader ---
+function makeGlassMat(color){const c=new THREE.Color(color),h={};c.getHSL(h);const gc=new THREE.Color().setHSL(h.h,h.s*.6,Math.min(1,h.l*1.35));return new THREE.ShaderMaterial({uniforms:{uColor:{value:gc},uLightDir:{value:new THREE.Vector3(.55,.7,.4).normalize()},uLightDir2:{value:new THREE.Vector3(-.3,-.15,-.35).normalize()},uCameraPos:{value:new THREE.Vector3()}},vertexShader:"varying vec3 vWPos,vWNormal;void main(){vec4 wp=modelMatrix*vec4(position,1.0);vWPos=wp.xyz;vWNormal=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",fragmentShader:"varying vec3 vWPos,vWNormal;uniform vec3 uColor,uLightDir,uLightDir2,uCameraPos;void main(){vec3 N=normalize(vWNormal),V=normalize(uCameraPos-vWPos);float f=pow(1.0-abs(dot(V,N)),3.5);vec3 H1=normalize(uLightDir+V),H2=normalize(uLightDir2+V);float s1=pow(max(dot(N,H1),0.0),180.0),s2=pow(max(dot(N,H2),0.0),80.0);float d=max(dot(N,uLightDir),0.0)*.25+.1;vec3 body=uColor*(d+.35);float ba=.12;vec3 edge=uColor*2.2*f;float ea=f*.4;float sp=s1*.85+s2*.45;gl_FragColor=vec4(body+edge+sp*vec3(1.0),clamp(ba+ea+sp*.85,0.0,1.0));}",transparent:true,depthWrite:true});}
+
+// --- Meshes ---
+const mNodes=[],mGroup=new THREE.Group();
+NODES.forEach((d,i)=>{const g=new THREE.SphereGeometry(d.r,48,48),m=new THREE.Mesh(g,makeGlassMat(d.color));m.position.copy(nodes[i].pos);m.userData={idx:i};mGroup.add(m);mNodes.push(m);});S.add(mGroup);
+
+// --- Connections ---
+const connGroup=new THREE.Group();
+function createBeam(p1,p2,c1,c2,rm){const dir=new THREE.Vector3().subVectors(p2,p1),len=dir.length();dir.normalize();const up=new THREE.Vector3(0,1,0);if(Math.abs(dir.dot(up))>.999)up.set(1,0,0);const rv=new THREE.Vector3().crossVectors(dir,up).normalize(),fw=new THREE.Vector3().crossVectors(rv,dir).normalize();const R=6,pos=[],cols=[],idx=[],segs=40;for(let i=0;i<=segs;i++){const t=i/segs,ct=p1.clone().add(dir.clone().multiplyScalar(t*len)),rad=rm*(.78+.22*Math.sin(t*Math.PI)),mc=c1.clone().lerp(c2,t),b=Math.sin(t*Math.PI);for(let j=0;j<R;j++){const a=j/R*Math.PI*2;pos.push(ct.x+rv.x*Math.cos(a)*rad+fw.x*Math.sin(a)*rad,ct.y+rv.y*Math.cos(a)*rad+fw.y*Math.sin(a)*rad,ct.z+rv.z*Math.cos(a)*rad+fw.z*Math.sin(a)*rad);cols.push(mc.r*b,mc.g*b,mc.b*b);}}for(let i=0;i<segs;i++)for(let j=0;j<R;j++){const a=i*R+j,b=i*R+((j+1)%R),c=(i+1)*R+j,d=(i+1)*R+((j+1)%R);idx.push(a,b,c);idx.push(b,d,c);}const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));g.setIndex(idx);g.computeVertexNormals();return g;}
+function buildConns(){while(connGroup.children.length){const c=connGroup.children[0];c.geometry.dispose();c.material.dispose();connGroup.remove(c);}EDGES.forEach(([f,t])=>{const p1=mNodes[f].position,p2=mNodes[t].position,c1=new THREE.Color(NODES[f].color),c2=new THREE.Color(NODES[t].color);const mg=createBeam(p1,p2,c1,c2,.022);connGroup.add(new THREE.Mesh(mg,new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:.5,blending:THREE.AdditiveBlending,depthWrite:false})));const cg=createBeam(p1,p2,c1,c2,.032);connGroup.add(new THREE.Mesh(cg,new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:.3,blending:THREE.AdditiveBlending,depthWrite:false})));});}
+buildConns();S.add(connGroup);
+
+// --- Scheme C: Focus = pin node at center, physics handles the rest ---
+let focusIdx=null;
+
+// --- Interaction ---
+const raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2();
+let dragNode=null,dragPlane=new THREE.Plane(),dragOffset=new THREE.Vector3(),didDrag=false,mdPos=new THREE.Vector2();
+
+function hitNode(e){mouse.x=e.clientX/innerWidth*2-1;mouse.y=-e.clientY/innerHeight*2+1;raycaster.setFromCamera(mouse,C);const hits=raycaster.intersectObjects(mNodes,false);return(hits.length&&hits[0].object.userData.idx!==undefined)?hits[0]:null;}
+
+R.domElement.addEventListener('mousedown',e=>{mdPos.set(e.clientX,e.clientY);const h=hitNode(e);if(h){dragNode=h.object;didDrag=false;ctrl.enabled=false;const n=C.getWorldDirection(new THREE.Vector3()).clone();dragPlane.set(n,-dragNode.position.dot(n));raycaster.setFromCamera(mouse,C);const pt=new THREE.Vector3();raycaster.ray.intersectPlane(dragPlane,pt);dragOffset.copy(pt).sub(dragNode.position);}});
+R.domElement.addEventListener('mousemove',e=>{if(dragNode){mouse.x=e.clientX/innerWidth*2-1;mouse.y=-e.clientY/innerHeight*2+1;raycaster.setFromCamera(mouse,C);const pt=new THREE.Vector3();raycaster.ray.intersectPlane(dragPlane,pt);if(pt){const np=pt.clone().sub(dragOffset),idx=dragNode.userData.idx;nodes[idx].pos.copy(np);dragNode.position.copy(np);didDrag=true;buildConns();}}});
+R.domElement.addEventListener('mouseup',()=>{if(dragNode){dragNode=null;ctrl.enabled=true;}});
+R.domElement.addEventListener('click',e=>{const dx=e.clientX-mdPos.x,dy=e.clientY-mdPos.y;if(didDrag||Math.sqrt(dx*dx+dy*dy)>3)return;const h=hitNode(e);
+  if(h){// FOCUS: pin clicked node at center, physics arranges everything
+    focusIdx=h.object.userData.idx;
+    // Smoothly animate node to center (force sim propagates to others)
+    const n=nodes[focusIdx];
+    n.vel.set(0,0,0);
+    // Lerp toward center over several frames instead of instant snap
+    const start=n.pos.clone();
+    let t=0;const dur=30; // frames
+    function animToCenter(){t++;const a=Math.min(1,t/dur);n.pos.lerpVectors(start,new THREE.Vector3(0,0,0),a*a*(3-2*a));if(a<1)requestAnimationFrame(animToCenter);else n.pinned=true;}
+    animToCenter();
+    document.getElementById('m').textContent='FOCUS MODE — node pinned at center, physics arranges rest | click empty to unfocus';}
+  else{// UNFOCUS
+    focusIdx=null;
+    nodes.forEach(n=>n.pinned=false);
+    document.getElementById('m').textContent='FREE MODE — drag nodes | click node to FOCUS (pinned at center) | click empty to unfocus';}
+});
+
+// --- Render ---
+const clk=new THREE.Clock();
+function anim(){requestAnimationFrame(anim);
+  ctrl.update();
+  for(let i=0;i<2;i++)simStep();
+  nodes.forEach((n,i)=>mNodes[i].position.copy(n.pos));
+  buildConns();
+  mNodes.forEach(m=>{if(m.material.uniforms)m.material.uniforms.uCameraPos.value.copy(C.position);});
+  R.render(S,C);
+}anim();
+addEventListener('resize',()=>{C.aspect=innerWidth/innerHeight;C.updateProjectionMatrix();R.setSize(innerWidth,innerHeight);});
+</script></body></html>

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KG Demo — Glass Nodes + Gradient Links</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #edede8;
+    font-family: "Inter", "PingFang SC", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+  }
+  canvas { display: block; }
+  .label {
+    position: absolute; pointer-events: none;
+    font-size: 12px; color: #555; letter-spacing: 0.02em;
+    transform: translate(-50%, -50%);
+    text-shadow: 0 0 6px rgba(237,237,232,0.9);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+const W = (canvas.width = window.innerWidth);
+const H = (canvas.height = window.innerHeight);
+
+// --- Nodes ---
+// Each node: { x, y, r, color, label }
+const nodes = [
+  { x: W*0.18, y: H*0.25, r: 38, color: [220, 80, 110],  label: 'Deep Squat' },
+  { x: W*0.35, y: H*0.15, r: 28, color: [80, 160, 190],   label: 'Hip Flexor' },
+  { x: W*0.52, y: H*0.30, r: 44, color: [200, 140, 60],   label: 'Barbell' },
+  { x: W*0.48, y: H*0.60, r: 32, color: [130, 100, 180],  label: 'Quadriceps' },
+  { x: W*0.68, y: H*0.18, r: 26, color: [60, 150, 120],   label: 'Core' },
+  { x: W*0.78, y: H*0.42, r: 36, color: [210, 100, 140],  label: 'Glutes' },
+  { x: W*0.72, y: H*0.68, r: 30, color: [90, 130, 200],   label: 'Hamstrings' },
+  { x: W*0.30, y: H*0.72, r: 34, color: [180, 110, 80],   label: 'Lower Back' },
+  { x: W*0.55, y: H*0.82, r: 40, color: [160, 70, 130],   label: 'Deadlift' },
+  { x: W*0.85, y: H*0.75, r: 24, color: [70, 150, 150],   label: 'Balance' },
+];
+
+// --- Edges ---
+// Each edge: [fromIdx, toIdx, thickness]
+const edges = [
+  [0,1,2], [0,2,3], [2,3,4], [3,4,3], [3,5,2],
+  [5,6,3], [6,7,2], [7,8,3], [8,9,1], [0,9,1],
+  [1,4,1], [5,2,2], [7,3,2], [8,6,1], [4,9,1],
+];
+
+// --- Draw background subtle grid ---
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(180,178,172,0.18)';
+  ctx.lineWidth = 0.5;
+  const step = 60;
+  for (let x = step; x < W; x += step) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = step; y < H; y += step) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+}
+
+// --- Draw a single glass/candy node ---
+function drawNode(n) {
+  const { x, y, r, color: [cr, cg, cb] } = n;
+
+  // Shadow — soft, offset, gives micro-3D depth
+  ctx.save();
+  ctx.shadowColor = `rgba(${cr*0.3},${cg*0.3},${cb*0.3},0.35)`;
+  ctx.shadowBlur = r * 0.6;
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 3;
+
+  // Main body — radial gradient simulating glass sphere
+  const grad = ctx.createRadialGradient(x - r*0.25, y - r*0.30, r*0.05, x, y, r);
+  grad.addColorStop(0,   `rgba(${Math.min(255,cr+80)},${Math.min(255,cg+80)},${Math.min(255,cb+80)},0.95)`);
+  grad.addColorStop(0.25,`rgba(${Math.min(255,cr+40)},${Math.min(255,cg+40)},${Math.min(255,cb+40)},0.92)`);
+  grad.addColorStop(0.55,`rgba(${cr},${cg},${cb},0.88)`);
+  grad.addColorStop(0.80,`rgba(${Math.max(0,cr-50)},${Math.max(0,cg-50)},${Math.max(0,cb-50)},0.85)`);
+  grad.addColorStop(1,   `rgba(${Math.max(0,cr-80)},${Math.max(0,cg-80)},${Math.max(0,cb-80)},0.78)`);
+
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.restore();
+
+  // Specular highlight — bright spot upper-left, keys the "glass" look
+  const hlGrad = ctx.createRadialGradient(x - r*0.28, y - r*0.32, 0, x - r*0.28, y - r*0.32, r*0.45);
+  hlGrad.addColorStop(0, 'rgba(255,255,255,0.75)');
+  hlGrad.addColorStop(0.4,'rgba(255,255,255,0.25)');
+  hlGrad.addColorStop(1, 'rgba(255,255,255,0)');
+
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = hlGrad;
+  ctx.fill();
+
+  // Tiny bright dot — the "wet" specular
+  ctx.beginPath();
+  ctx.arc(x - r*0.26, y - r*0.34, r*0.08, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.fill();
+
+  // Subtle rim light
+  ctx.beginPath();
+  ctx.arc(x, y, r - 1.5, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,255,255,0.15)`;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+// --- Draw a single edge with gradient stroke ---
+function drawEdge(n1, n2, thickness) {
+  const dx = n2.x - n1.x;
+  const dy = n2.y - n1.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  // Control point for slight curve
+  const mx = (n1.x + n2.x) / 2;
+  const my = (n1.y + n2.y) / 2;
+  const perpX = -dy / dist * (dist * 0.08 + Math.random() * dist * 0.10);
+  const perpY =  dx / dist * (dist * 0.08 + Math.random() * dist * 0.10);
+  const cx = mx + perpX;
+  const cy = my + perpY;
+
+  // Draw the bezier curve multiple times with varying opacity
+  // to create the "pulled sugar" gradient effect — dense middle, fading ends
+  const segments = 40;
+  const midWeight = thickness * 1.6;
+  const endWeight = thickness * 0.15;
+
+  for (let i = 0; i < segments; i++) {
+    const t1 = i / segments;
+    const t2 = (i + 1) / segments;
+
+    // Cubic bezier: interpolate from n1 to n2 via control point cx,cy
+    // We treat it as two quadratic bezier segments from n1->(cx,cy)->n2
+    // For simplicity, use a single quadratic bezier with midpoint control
+    const getPoint = (t) => {
+      const inv = 1 - t;
+      return {
+        x: inv*inv * n1.x + 2*inv*t * cx + t*t * n2.x,
+        y: inv*inv * n1.y + 2*inv*t * cy + t*t * n2.y,
+      };
+    };
+
+    const p1 = getPoint(t1);
+    const p2 = getPoint(t2);
+
+    // Opacity peaks at center, fades to ends (gaussian-like)
+    const midT = (t1 + t2) / 2;
+    const distFromCenter = Math.abs(midT - 0.5) * 2; // 0 at center, 1 at ends
+    const alpha = Math.exp(-distFromCenter * distFromCenter * 4); // gaussian falloff
+
+    // Line width also varies
+    const w = endWeight + (midWeight - endWeight) * alpha;
+
+    // Color: slightly tinted toward the midpoint color of the two nodes
+    const mixR = Math.round((n1.color[0] + n2.color[0]) / 2);
+    const mixG = Math.round((n1.color[1] + n2.color[1]) / 2);
+    const mixB = Math.round((n1.color[2] + n2.color[2]) / 2);
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.strokeStyle = `rgba(${mixR},${mixG},${mixB},${alpha * 0.55})`;
+    ctx.lineWidth = w;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  // Overlay a thin bright core at the center of each line
+  const coreSegs = 20;
+  for (let i = Math.floor(coreSegs*0.3); i < Math.floor(coreSegs*0.7); i++) {
+    const t1 = i / coreSegs;
+    const t2 = (i + 1) / coreSegs;
+    const midT = (t1 + t2) / 2;
+    const distFromCenter = Math.abs(midT - 0.5) * 2;
+    const alpha = Math.exp(-distFromCenter * distFromCenter * 3) * 0.35;
+
+    const inv1 = 1 - t1, inv2 = 1 - t2;
+    const p1 = { x: inv1*inv1*n1.x + 2*inv1*t1*cx + t1*t1*n2.x, y: inv1*inv1*n1.y + 2*inv1*t1*cy + t1*t1*n2.y };
+    const p2 = { x: inv2*inv2*n1.x + 2*inv2*t2*cx + t2*t2*n2.x, y: inv2*inv2*n1.y + 2*inv2*t2*cy + t2*t2*n2.y };
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+    ctx.lineWidth = thickness * 0.5;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+}
+
+// --- Draw label ---
+function drawLabel(n) {
+  ctx.font = '11px "Inter","PingFang SC",system-ui,sans-serif';
+  ctx.fillStyle = '#5a5a55';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(n.label, n.x, n.y + n.r + 10);
+}
+
+// --- Render ---
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  drawGrid();
+
+  // Draw edges first (behind nodes)
+  edges.forEach(([from, to, thick]) => {
+    drawEdge(nodes[from], nodes[to], thick);
+  });
+
+  // Draw nodes
+  nodes.forEach(n => drawNode(n));
+
+  // Draw labels
+  nodes.forEach(n => drawLabel(n));
+}
+
+render();
+
+// --- Gentle hover interaction: glow nearest node ---
+canvas.addEventListener('mousemove', (e) => {
+  render();
+  const mx = e.clientX, my = e.clientY;
+  let closest = null, closestDist = Infinity;
+
+  nodes.forEach((n, i) => {
+    const d = Math.hypot(mx - n.x, my - n.y);
+    if (d < closestDist) { closestDist = d; closest = i; }
+  });
+
+  if (closest !== null && closestDist < 150) {
+    const n = nodes[closest];
+    const glow = ctx.createRadialGradient(n.x, n.y, n.r*0.6, n.x, n.y, n.r*1.8);
+    const [cr, cg, cb] = n.color;
+    glow.addColorStop(0, `rgba(${cr},${cg},${cb},0.35)`);
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r * 1.8, 0, Math.PI*2);
+    ctx.fillStyle = glow;
+    ctx.fill();
+  }
+});
+
+window.addEventListener('resize', () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  location.reload();
+});
+</script>
+</body>
+</html>
