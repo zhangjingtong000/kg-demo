@@ -278,8 +278,8 @@ function showFocusRing(nodeMesh, colorHex, nodeR) {
   if (focusRing) { focusRing.geometry.dispose(); focusRing.material.dispose(); scene.remove(focusRing); }
   const col = new THREE.Color(colorHex);
   const bright = col.clone().multiplyScalar(1.8);
-  const geo = new THREE.TorusGeometry(nodeR * 1.15, 0.06, 16, 48);
-  const mat = new THREE.MeshBasicMaterial({ color: bright, transparent: true, opacity: 0.8, depthWrite: false });
+  const geo = new THREE.TorusGeometry(nodeR * 1.15, 0.06, 8, 32);
+  const mat = new THREE.MeshBasicMaterial({ color: bright, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
   focusRing = new THREE.Mesh(geo, mat);
   focusRing.position.copy(nodeMesh.position);
   scene.add(focusRing);
@@ -313,7 +313,7 @@ function setFocusDiffusion(fi) {
   });
 }
 let dirty = false;
-let didDrag = false; // true if mousemove happened during drag → suppresses click
+let didDrag = false;
 const cameraTarget = new THREE.Vector3(18, 10, 22);
 const defaultCam = new THREE.Vector3(18, 10, 22);
 const focusCam = new THREE.Vector3(0, 14, 16);
@@ -419,8 +419,8 @@ renderer.domElement.addEventListener('mousemove', (e) => {
 renderer.domElement.addEventListener('mouseup', () => {
   if (dragNode) {
     dragNode = null; controls.enabled = true;
-    springActive = true; // start spring-back after drag release
     springVels.forEach(v => v.set(0,0,0));
+    springActive = true; // immediate spring-back, only from node drag
   }
 });
 
@@ -469,12 +469,11 @@ renderer.domElement.addEventListener('click', (e) => {
 
 renderer.domElement.addEventListener('mousedown', (e) => {
   mouseDownPos.set(e.clientX, e.clientY);
+  springActive = false; clearTimeout(hoverTimeout);
   const hit = findHitNode(e);
   if (hit) {
     dragNode = hit.object;
     didDrag = false;
-    springActive = false; // stop any ongoing spring-back
-    // Save current positions as rest — nodes will spring back here
     nodeMeshes.forEach(({mesh},i) => restPositions[i].copy(mesh.position));
     controls.enabled = false;
     const normal = camera.getWorldDirection(new THREE.Vector3()).clone();
@@ -557,12 +556,12 @@ function animate() {
     mesh.scale.setScalar(cur+(tgt-cur)*4.0*dt);
   });
   if (focusedIdx!==null) { const fm=nodeMeshes[focusedIdx].mesh, p=1+Math.sin(elapsed*4.0)*0.04; fm.scale.setScalar(fm.scale.x+(p-fm.scale.x)*0.3); }
-  // Sync focus ring position + scale
+  // Sync focus ring: follow node, face camera, match scale
   if (focusRing) {
     const fm = nodeMeshes[focusedIdx].mesh;
     focusRing.position.copy(fm.position);
-    const s = fm.scale.x;
-    focusRing.scale.setScalar(s);
+    focusRing.lookAt(camera.position);
+    focusRing.scale.setScalar(fm.scale.x);
   }
 
   renderer.render(scene, camera);
