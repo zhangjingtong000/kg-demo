@@ -266,12 +266,6 @@ let hoveredIdx = null;
 const origPos = graphData.map(d => new THREE.Vector3(...d.pos));
 let targets = origPos.map(p => p.clone());
 
-// Spring-back state
-let restPositions = origPos.map(p => p.clone());
-let springVels = graphData.map(() => new THREE.Vector3());
-let springActive = false;
-const SPRING_K = 8, SPRING_DAMP = 0.7;
-
 // Focus highlight ring
 let focusRing = null;
 function showFocusRing(nodeMesh, colorHex, nodeR) {
@@ -419,8 +413,6 @@ renderer.domElement.addEventListener('mousemove', (e) => {
 renderer.domElement.addEventListener('mouseup', () => {
   if (dragNode) {
     dragNode = null; controls.enabled = true;
-    springVels.forEach(v => v.set(0,0,0));
-    springActive = true; // immediate spring-back, only from node drag
   }
 });
 
@@ -445,7 +437,6 @@ renderer.domElement.addEventListener('click', (e) => {
   if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy) > 3) return; // was a drag or orbit
   const hit = findHitNode(e);
   if (hit) {
-    springActive = false;
     focusedIdx = hit.object.userData.idx;
     targets = radialLayout(focusedIdx);
     setFocusDiffusion(focusedIdx);
@@ -453,7 +444,6 @@ renderer.domElement.addEventListener('click', (e) => {
     const fd = graphData[focusedIdx];
     showFocusRing(nodeMeshes[focusedIdx].mesh, fd.color, fd.r);
   } else {
-    springActive = false;
     focusedIdx = null;
     hideFocusRing();
     targets = origPos.map(p=>p.clone());
@@ -469,12 +459,11 @@ renderer.domElement.addEventListener('click', (e) => {
 
 renderer.domElement.addEventListener('mousedown', (e) => {
   mouseDownPos.set(e.clientX, e.clientY);
-  springActive = false; clearTimeout(hoverTimeout);
+  clearTimeout(hoverTimeout);
   const hit = findHitNode(e);
   if (hit) {
     dragNode = hit.object;
     didDrag = false;
-    nodeMeshes.forEach(({mesh},i) => restPositions[i].copy(mesh.position));
     controls.enabled = false;
     const normal = camera.getWorldDirection(new THREE.Vector3()).clone();
     dragPlane.set(normal, -dragNode.position.dot(normal));
@@ -494,37 +483,13 @@ function animate() {
 
   let moving = false;
 
-  // Spring-back: pull nodes toward restPositions with underdamped spring
-  if (springActive && !dragNode) {
-    let settled = true;
-    nodeMeshes.forEach(({ mesh }, i) => {
-      const dx = restPositions[i].x - mesh.position.x;
-      const dy = restPositions[i].y - mesh.position.y;
-      const dz = restPositions[i].z - mesh.position.z;
-      const dist = Math.sqrt(dx*dx+dy*dy+dz*dz);
-      if (dist > 0.005 || springVels[i].length() > 0.005) settled = false;
-      // Spring force: F = -k * displacement
-      springVels[i].x += dx * SPRING_K * dt;
-      springVels[i].y += dy * SPRING_K * dt;
-      springVels[i].z += dz * SPRING_K * dt;
-      springVels[i].multiplyScalar(SPRING_DAMP);
-      mesh.position.x += springVels[i].x * dt;
-      mesh.position.y += springVels[i].y * dt;
-      mesh.position.z += springVels[i].z * dt;
-      targets[i].copy(mesh.position);
-    });
-    if (settled) { springActive = false; springVels.forEach(v => v.set(0,0,0)); }
-    moving = true;
-  }
-  // Normal movement (lerp to targets when focused or not springing)
-  else if (!springActive) {
-    nodeMeshes.forEach(({ mesh }, i) => {
-      if (dragNode && mesh === dragNode) { moving = true; return; }
-      const t=targets[i], dx=t.x-mesh.position.x, dy=t.y-mesh.position.y, dz=t.z-mesh.position.z;
-      const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
-      if (dist>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
-    });
-  }
+  // Normal movement: lerp to targets (for focus animation)
+  nodeMeshes.forEach(({ mesh }, i) => {
+    if (dragNode && mesh === dragNode) { moving = true; return; }
+    const t=targets[i], dx=t.x-mesh.position.x, dy=t.y-mesh.position.y, dz=t.z-mesh.position.z;
+    const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    if (dist>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
+  });
 
   // Focus diffusion: smooth alpha transitions (glow only when not hovering)
   if (hoveredIdx === null) {
