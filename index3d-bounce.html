@@ -32,7 +32,7 @@ scene.background = new THREE.Color('#080c12');
 scene.fog = new THREE.FogExp2('#080c12', 0.00006);
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.5, 200);
-camera.position.set(0, 14, 16);
+camera.position.set(0, 22, 30);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -314,8 +314,7 @@ function setFocusDiffusion(fi) {
 }
 let dirty = false;
 let didDrag = false;
-let cameraTarget = null; // null = don't touch camera; set = lerp toward this
-const focusCam = new THREE.Vector3(0, 14, 16);
+const focusCam = new THREE.Vector3(0, 22, 30);
 
 function bfs(startIdx) {
   const dist = new Map(), q = [startIdx]; dist.set(startIdx, 0);
@@ -448,7 +447,9 @@ renderer.domElement.addEventListener('click', (e) => {
     focusedIdx = hit.object.userData.idx;
     targets = radialLayout(focusedIdx);
     setFocusDiffusion(focusedIdx);
-    cameraTarget = focusCam.clone();
+    // One-time camera jump to front view, then release
+    camera.position.copy(focusCam);
+    controls.target.set(0, 0, 0);
     const fd = graphData[focusedIdx];
     showFocusRing(nodeMeshes[focusedIdx].mesh, fd.color, fd.r);
   } else {
@@ -457,7 +458,6 @@ renderer.domElement.addEventListener('click', (e) => {
     hideFocusRing();
     targets = origPos.map(p=>p.clone());
     setFocusDiffusion(null);
-    cameraTarget = null; // release camera back to user
   }
   dirty = true;
   const el=document.getElementById('focusLabel'), sp=el.querySelector('span');
@@ -515,14 +515,16 @@ function animate() {
     if (settled) { springActive = false; springVels.forEach(v => v.set(0,0,0)); }
     moving = true;
   }
-  // Focus animation: lerp to radial layout targets
-  else if (focusedIdx !== null) {
+  // Lerp to targets (focus animation + unfocus return)
+  else {
+    let anyMoving = false;
     nodeMeshes.forEach(({ mesh }, i) => {
-      if (dragNode && mesh === dragNode) { moving = true; return; }
+      if (dragNode && mesh === dragNode) { anyMoving = true; return; }
       const t=targets[i], dx=t.x-mesh.position.x, dy=t.y-mesh.position.y, dz=t.z-mesh.position.z;
       const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
-      if (dist>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
+      if (dist>0.01) { anyMoving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
     });
+    if (anyMoving) moving = true;
   }
 
   // Focus diffusion: smooth alpha transitions (glow only when not hovering)
@@ -533,8 +535,8 @@ function animate() {
       if (m.children.length>0) m.children[0].material.uniforms.uGlowOpacity.value = curGlowAlpha[i];
     }
   }
-  // Edge alpha from focus diffusion (only when not hovering + focused)
-  if (hoveredIdx === null && focusedIdx !== null) {
+  // Edge alpha: lerp toward target (always when not hovering)
+  if (hoveredIdx === null) {
     for (let k=0;k<edges.length;k++) {
       curEdgeAlpha[k] += (tgtEdgeAlpha[k]-curEdgeAlpha[k]) * DIFF_LERP * dt;
       const eo = edgeObjects[k];
@@ -543,12 +545,6 @@ function animate() {
   }
 
   if (moving||dirty) { refreshEdgePositions(); updateLabels(); dirty=false; }
-
-  // Camera: only auto-move when transitioning to focus
-  if (cameraTarget) {
-    camera.position.lerp(cameraTarget, 2.5*dt);
-    controls.target.lerp(focusedIdx!==null ? nodeMeshes[focusedIdx].mesh.position : new THREE.Vector3(0,0,0), 2.5*dt);
-  }
 
   nodeMeshes.forEach(({ mesh }) => { if(mesh.material.uniforms) mesh.material.uniforms.uCameraPos.value.copy(camera.position); });
   stars.rotation.y += dt*0.015; stars.rotation.x += dt*0.008;
