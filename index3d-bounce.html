@@ -173,9 +173,9 @@ gl_FragColor=vec4(col,alpha);}`,
 
   const glowGeo = new THREE.SphereGeometry(r*1.9, 32, 32);
   const glowMat = new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: col.clone() } },
+    uniforms: { uColor: { value: col.clone() }, uGlowOpacity: { value: 1.0 } },
     vertexShader: `varying vec3 vN,vP;void main(){vec4 wp=modelMatrix*vec4(position,1.0);vP=wp.xyz;vN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-    fragmentShader: `varying vec3 vN,vP;uniform vec3 uColor;void main(){vec3 V=normalize(cameraPosition-vP);float f=1.0-abs(dot(V,vN));gl_FragColor=vec4(uColor,f*f*0.22);}`,
+    fragmentShader: `varying vec3 vN,vP;uniform vec3 uColor;uniform float uGlowOpacity;void main(){vec3 V=normalize(cameraPosition-vP);float f=1.0-abs(dot(V,vN));gl_FragColor=vec4(uColor,f*f*0.22*uGlowOpacity);}`,
     transparent: true, depthWrite: false,
   });
   mesh.add(new THREE.Mesh(glowGeo, glowMat));
@@ -267,10 +267,18 @@ const origPos = graphData.map(d => new THREE.Vector3(...d.pos));
 let targets = origPos.map(p => p.clone());
 
 // Spring-back state
-let restPositions = origPos.map(p => p.clone()); // where nodes want to return
-let springVels = graphData.map(() => new THREE.Vector3()); // velocities for spring-back
+let restPositions = origPos.map(p => p.clone());
+let springVels = graphData.map(() => new THREE.Vector3());
 let springActive = false;
 const SPRING_K = 8, SPRING_DAMP = 0.7;
+
+// Diffusion dimming state
+let hoverDist = null; // Map<idx, distance> from hovered node
+let curNodeAlpha = graphData.map(() => 1.0); // current glow alpha
+let tgtNodeAlpha = graphData.map(() => 1.0); // target glow alpha
+let curEdgeAlpha = edges.map(() => 1.0); // current edge alpha
+let tgtEdgeAlpha = edges.map(() => 1.0); // target edge alpha
+const ALPHA_LERP = 3.0; // lerp speed
 let dirty = false;
 let didDrag = false; // true if mousemove happened during drag → suppresses click
 const cameraTarget = new THREE.Vector3(18, 10, 22);
@@ -345,29 +353,33 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       dirty = true;
     }
   } else {
-    // --- Hover highlight (debounced) ---
+    // --- Diffusion hover (debounced) ---
     const hit = findHitNode(e);
     const targetIdx = hit ? hit.object.userData.idx : null;
     if (targetIdx !== hoveredIdx) {
       clearTimeout(hoverTimeout);
       if (targetIdx === null) {
-        // Leaving immediately clears highlight
+        // Leaving: fade everything back to full
         hoveredIdx = null;
-        setEdgeHighlight(null);
-        nodeMeshes.forEach(({ mesh }) => {
-          if (mesh.children.length>0) mesh.children[0].visible = true;
-          if (mesh.material.uniforms) mesh.material.uniforms.uHover.value = 0;
-        });
+        hoverDist = null;
+        tgtNodeAlpha.forEach((_,i) => tgtNodeAlpha[i] = 1.0);
+        tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
       } else {
-        // Entering: delay 150ms before showing highlight
+        // Entering: delay 150ms, then compute distance-based targets
         hoverTimeout = setTimeout(() => {
           hoveredIdx = targetIdx;
-          setEdgeHighlight(hoveredIdx);
-          const neighborSet = new Set([hoveredIdx, ...(adjMap.get(hoveredIdx)||[])]);
-          nodeMeshes.forEach(({ mesh }, i) => {
-            const on = neighborSet.has(i);
-            if (mesh.children.length>0) mesh.children[0].visible = on;
-            if (mesh.material.uniforms) mesh.material.uniforms.uHover.value = (i===hoveredIdx) ? 1 : 0;
+          hoverDist = bfs(hoveredIdx);
+          // Node targets: exponential falloff by distance
+          for (let i=0;i<graphData.length;i++) {
+            const d = hoverDist.has(i) ? hoverDist.get(i) : 999;
+            tgtNodeAlpha[i] = d === 0 ? 1.0 : d === 1 ? 0.65 : d === 2 ? 0.35 : d === 3 ? 0.15 : 0.06;
+          }
+          // Edge targets: based on min distance of two endpoints
+          edges.forEach(([f,t],k) => {
+            const df = hoverDist.has(f) ? hoverDist.get(f) : 999;
+            const dt = hoverDist.has(t) ? hoverDist.get(t) : 999;
+            const d = Math.min(df, dt);
+            tgtEdgeAlpha[k] = d === 0 ? 1.0 : d === 1 ? 0.5 : d === 2 ? 0.2 : d === 3 ? 0.08 : 0.03;
           });
         }, 150);
       }
@@ -386,14 +398,10 @@ renderer.domElement.addEventListener('mouseup', () => {
 renderer.domElement.addEventListener('mouseleave', () => {
   if (dragNode) { dragNode = null; controls.enabled = true; }
   clearTimeout(hoverTimeout);
-  if (hoveredIdx !== null) {
-    hoveredIdx = null;
-    setEdgeHighlight(null);
-    nodeMeshes.forEach(({ mesh }) => {
-      if (mesh.children.length>0) mesh.children[0].visible = true;
-      if (mesh.material.uniforms && mesh.material.uniforms.uHover) mesh.material.uniforms.uHover.value = 0;
-    });
-  }
+  hoveredIdx = null;
+  hoverDist = null;
+  tgtNodeAlpha.forEach((_,i) => tgtNodeAlpha[i] = 1.0);
+  tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
 });
 
 // --- Click (separate from drag & orbit) ---
@@ -401,7 +409,11 @@ let mouseDownPos = new THREE.Vector2();
 
 renderer.domElement.addEventListener('click', (e) => {
   const mdx = e.clientX - mouseDownPos.x, mdy = e.clientY - mouseDownPos.y;
-  if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy) > 3) return; // was a drag or orbit
+  if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy) > 3) return;
+  // Reset diffusion on click
+  hoveredIdx = null; hoverDist = null;
+  tgtNodeAlpha.forEach((_,i) => tgtNodeAlpha[i] = 1.0);
+  tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
   const hit = findHitNode(e);
   if (hit) {
     springActive = false; // cancel any spring-back
@@ -479,6 +491,19 @@ function animate() {
       const dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
       if (dist>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
     });
+  }
+
+  // --- Diffusion alpha lerp (every frame, not just when moving) ---
+  for (let i=0;i<graphData.length;i++) {
+    curNodeAlpha[i] += (tgtNodeAlpha[i] - curNodeAlpha[i]) * ALPHA_LERP * dt;
+    const m = nodeMeshes[i].mesh;
+    if (m.children.length>0) m.children[0].material.uniforms.uGlowOpacity.value = curNodeAlpha[i];
+    if (m.material.uniforms) m.material.uniforms.uHover.value = (hoveredIdx === i) ? 1.0 : curNodeAlpha[i];
+  }
+  for (let k=0;k<edges.length;k++) {
+    curEdgeAlpha[k] += (tgtEdgeAlpha[k] - curEdgeAlpha[k]) * ALPHA_LERP * dt;
+    const eo = edgeObjects[k];
+    if (eo) { eo.main.material.opacity = 0.5 * curEdgeAlpha[k]; eo.core.material.opacity = 0.3 * curEdgeAlpha[k]; }
   }
 
   if (moving||dirty) { refreshEdgePositions(); updateLabels(); dirty=false; }
