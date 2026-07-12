@@ -314,6 +314,7 @@ function setFocusDiffusion(fi) {
 }
 let dirty = false;
 let didDrag = false;
+let frameSkip = 0;
 const focusCam = new THREE.Vector3(0, 22, 30);
 
 function bfs(startIdx) {
@@ -544,7 +545,11 @@ function animate() {
     }
   }
 
-  if (moving||dirty) { refreshEdgePositions(); updateLabels(); dirty=false; }
+  if (moving||dirty) {
+    frameSkip = (frameSkip + 1) % 2;
+    if (frameSkip === 0 || dirty) refreshEdgePositions();
+    updateLabels(); dirty=false;
+  }
 
   nodeMeshes.forEach(({ mesh }) => { if(mesh.material.uniforms) mesh.material.uniforms.uCameraPos.value.copy(camera.position); });
   stars.rotation.y += dt*0.015; stars.rotation.x += dt*0.008;
