@@ -110,18 +110,22 @@ class Neo4jStore:
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
     def import_data(self, nodes: list[dict], edges: list[dict]):
+        def esc(s):
+            """Escape Neo4j label/type with spaces or special chars."""
+            return f"`{s}`" if any(c in s for c in ' -/()[]{}:') else s
+
         with self.driver.session() as s:
             # Create nodes
             for n in nodes:
                 s.run(
-                    f"MERGE (x:{n['type']} {{name: $name}}) SET x.description = $desc",
+                    f"MERGE (x:{esc(n['type'])} {{name: $name}}) SET x.description = $desc",
                     name=n["name"], desc=n.get("description", ""),
                 )
             # Create edges
             for e in edges:
                 s.run(
                     f"MATCH (a {{name: $src}}), (b {{name: $tgt}}) "
-                    f"MERGE (a)-[:{e['type']} {{description: $desc}}]->(b)",
+                    f"MERGE (a)-[:{esc(e['type'])} {{description: $desc}}]->(b)",
                     src=e["source"], tgt=e["target"], desc=e.get("description", ""),
                 )
 
