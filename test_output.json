@@ -1,0 +1,187 @@
+{
+  "nodes": [
+    {
+      "name": "Squats",
+      "type": "Exercise",
+      "description": "Compound exercise targeting lower body muscles."
+    },
+    {
+      "name": "Quadriceps",
+      "type": "Muscle",
+      "description": "Primary muscle in the thigh."
+    },
+    {
+      "name": "Hamstrings",
+      "type": "Muscle",
+      "description": "Muscle group at the back of the thigh."
+    },
+    {
+      "name": "Glutes",
+      "type": "Muscle",
+      "description": "Muscle group in the buttocks."
+    },
+    {
+      "name": "Body Weight",
+      "type": "Equipment",
+      "description": "Use of one's own weight for resistance."
+    },
+    {
+      "name": "Barbell",
+      "type": "Equipment",
+      "description": "Weightlifting bar used for exercises."
+    },
+    {
+      "name": "Chest",
+      "type": "BodyPart",
+      "description": "Front part of the torso."
+    },
+    {
+      "name": "Lower Back",
+      "type": "BodyPart",
+      "description": "Posterior part of the lower torso."
+    },
+    {
+      "name": "Standing Position",
+      "type": "Concept",
+      "description": "Initial posture for the squat."
+    },
+    {
+      "name": "Deadlifts",
+      "type": "Exercise",
+      "description": "Compound movement engaging posterior chain."
+    },
+    {
+      "name": "Posterior Chain",
+      "type": "Concept",
+      "description": "Muscle group on the backside of the body."
+    },
+    {
+      "name": "Erector Spinae",
+      "type": "Muscle",
+      "description": "Muscle group along the spine."
+    },
+    {
+      "name": "Floor",
+      "type": "Concept",
+      "description": "Starting position for the deadlift."
+    },
+    {
+      "name": "Hips",
+      "type": "BodyPart",
+      "description": "Part of the pelvis."
+    },
+    {
+      "name": "Back",
+      "type": "BodyPart",
+      "description": "Posterior part of the torso."
+    },
+    {
+      "name": "Bench Press",
+      "type": "Exercise",
+      "description": "Upper body exercise targeting chest and arms."
+    },
+    {
+      "name": "Pectoralis Major",
+      "type": "Muscle",
+      "description": "Primary chest muscle."
+    },
+    {
+      "name": "Anterior Deltoids",
+      "type": "Muscle",
+      "description": "Front part of the shoulder muscles."
+    },
+    {
+      "name": "Triceps Brachii",
+      "type": "Muscle",
+      "description": "Muscle at the back of the upper arm."
+    },
+    {
+      "name": "Flat Bench",
+      "type": "Equipment",
+      "description": "Bench used for the bench press."
+    },
+    {
+      "name": "Leg Press Machine",
+      "type": "Equipment",
+      "description": "Machine for lower body exercise."
+    },
+    {
+      "name": "Spinal Loading",
+      "type": "Concept",
+      "description": "Pressure on the spine during exercise."
+    },
+    {
+      "name": "Planks",
+      "type": "Exercise",
+      "description": "Core stability exercise."
+    },
+    {
+      "name": "Rectus Abdominis",
+      "type": "Muscle",
+      "description": "Abdominal muscle."
+    },
+    {
+      "name": "Transverse Abdominis",
+      "type": "Muscle",
+      "description": "Deep abdominal muscle."
+    },
+    {
+      "name": "Russian Twists",
+      "type": "Exercise",
+      "description": "Core exercise targeting obliques."
+    },
+    {
+      "name": "Obliques",
+      "type": "Muscle",
+      "description": "Side abdominal muscles."
+    },
+    {
+      "name": "Medicine Ball",
+      "type": "Equipment",
+      "description": "Ball used for weighted exercises."
+    },
+    {
+      "name": "Knees",
+      "type": "BodyPart",
+      "description": "Joints in the lower legs."
+    },
+    {
+      "name": "Spine",
+      "type": "BodyPart",
+      "description": "Central skeletal structure of the torso."
+    },
+    {
+      "name": "Core Stability",
+      "type": "Concept",
+      "description": "Stabilization of the core muscles."
+    },
+    {
+      "name": "Compound Exercise",
+      "type": "Concept",
+      "description": "Exercise engaging multiple muscle groups."
+    },
+    {
+      "name": "Compound Movement",
+      "type": "Concept",
+      "description": "Movement involving multiple joints and muscles."
+    },
+    {
+      "name": "Knees",
+      "type": "BodyPart",
+      "description": "Joints in the lower legs."
+    },
+    {
+      "name": "Hips",
+      "type": "BodyPart",
+      "description": "Part of the pelvis."
+    }
+  ],
+  "edges": [],
+  "timing": {
+    "entities_s": 132.4,
+    "relations_s": 197.4
+  },
+  "model": "cloud",
+  "model_text": "Qwen/Qwen3-32B",
+  "model_vision": null
+}

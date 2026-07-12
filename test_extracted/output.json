@@ -1,0 +1,55 @@
+{
+  "parsed": {
+    "file": "E:/test/kg-demo/sample_fitness.txt",
+    "total_pages": 1,
+    "pages": [
+      {
+        "num": 1,
+        "text": "Squats are a compound exercise that primarily targets\nthe quadriceps, hamstrings, and glutes. The exercise\nis performed using body weight or a barbell placed\nacross the upper back. Proper form requires keeping\nthe chest up and the lower back neutral throughout\nthe movement. The squat begins from a standing\nposition, descends until the hips are below the\nknees, and returns to standing.\nDeadlifts are another fundamental compound movement\nthat engages the entire posterior chain including the\nerector spinae, glutes, and hamstrings. The\nconventional deadlift uses a barbell and begins with\nthe weight on the floor. The lifter hinges at the\nhips while maintaining a flat back, grips the bar\nwith both hands, and stands up by extending the hips\nand knees simultaneously.\nThe bench press is an upper body exercise that\ntargets the pectoralis major, anterior deltoids, and\ntriceps brachii. It is performed lying on a flat\nbench while pressing a barbell from the chest to full\narm extension. The leg press machine provides an\nalternative to squats for those with lower back\nissues, isolating the quadriceps while reducing\nspinal loading.\nFor core stability, planks and Russian twists are\nrecommended. Planks engage the rectus abdominis and\ntransverse abdominis without equipment. Russian\ntwists additionally target the obliques and can be\nweighted with a medicine ball for progression.",
+        "images": []
+      }
+    ],
+    "tables": []
+  },
+  "chunked": {
+    "file": "E:/test/kg-demo/sample_fitness.txt",
+    "total_pages": 1,
+    "total_chunks": 4,
+    "tables": [],
+    "chunks": [
+      {
+        "page": 1,
+        "chunk_idx": 1,
+        "char_count": 387,
+        "text": "Squats are a compound exercise that primarily targets\nthe quadriceps, hamstrings, and glutes. The exercise\nis performed using body weight or a barbell placed\nacross the upper back. Proper form requires keeping\nthe chest up and the lower back neutral throughout\nthe movement. The squat begins from a standing\nposition, descends until the hips are below the\nknees, and returns to standing.",
+        "images": []
+      },
+      {
+        "page": 1,
+        "chunk_idx": 2,
+        "char_count": 495,
+        "text": "The squat begins from a standing\nposition, descends until the hips are below the\nknees, and returns to standing.\n\nDeadlifts are another fundamental compound movement\nthat engages the entire posterior chain including the\nerector spinae, glutes, and hamstrings. The\nconventional deadlift uses a barbell and begins with\nthe weight on the floor. The lifter hinges at the\nhips while maintaining a flat back, grips the bar\nwith both hands, and stands up by extending the hips\nand knees simultaneously.",
+        "images": []
+      },
+      {
+        "page": 1,
+        "chunk_idx": 3,
+        "char_count": 482,
+        "text": "maintaining a flat back, grips the bar\nwith both hands, and stands up by extending the hips\nand knees simultaneously.\n\nThe bench press is an upper body exercise that\ntargets the pectoralis major, anterior deltoids, and\ntriceps brachii. It is performed lying on a flat\nbench while pressing a barbell from the chest to full\narm extension. The leg press machine provides an\nalternative to squats for those with lower back\nissues, isolating the quadriceps while reducing\nspinal loading.",
+        "images": []
+      },
+      {
+        "page": 1,
+        "chunk_idx": 4,
+        "char_count": 363,
+        "text": "an\nalternative to squats for those with lower back\nissues, isolating the quadriceps while reducing\nspinal loading.\n\nFor core stability, planks and Russian twists are\nrecommended. Planks engage the rectus abdominis and\ntransverse abdominis without equipment. Russian\ntwists additionally target the obliques and can be\nweighted with a medicine ball for progression.",
+        "images": []
+      }
+    ]
+  },
+  "config": {
+    "max_chars": 400,
+    "overlap_ratio": 0.3,
+    "chunking": true
+  }
+}

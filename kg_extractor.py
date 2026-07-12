@@ -285,26 +285,31 @@ def chunk_text(text: str, max_chars: int = 500, overlap_ratio: float = 0.3) -> l
 def deduplicate_entities(entities: list[dict], mode: str = "local") -> list[dict]:
     """
     Merge entities with identical or similar names.
-    - Exact name match → keep the one with better description
-    - LLM-assisted fuzzy match for near-duplicates (optional)
+    - Case-insensitive exact name → merge (keep longer description)
+    - Same type + >70% char overlap → merge
+    - Cross-type: keep separate (e.g. "Bench Press" exercise vs "Bench" equipment)
     """
-    # Phase 1: Exact name dedup
+    # Phase 1: Case-insensitive exact name dedup
     seen = {}
     for e in entities:
         key = e["name"].lower().strip()
         if key in seen:
-            # Keep the one with longer description
-            if len(e.get("description", "")) > len(seen[key].get("description", "")):
-                seen[key] = e
+            existing = seen[key]
+            # Normalize to Title Case
+            if e["name"] and existing["name"] and e["name"][0].isupper() and not existing["name"][0].isupper():
+                existing["name"] = e["name"]
+            # Keep longer description
+            if len(e.get("description", "")) > len(existing.get("description", "")):
+                existing["description"] = e["description"]
         else:
+            e["name"] = e["name"].strip()
             seen[key] = e
 
-    # Phase 2: LLM fuzzy dedup for similar names
     unique = list(seen.values())
     if len(unique) <= 1:
         return unique
 
-    # Group by type, check within each type group for near-duplicates
+    # Phase 2: Same-type fuzzy dedup
     by_type = {}
     for e in unique:
         t = e["type"]
@@ -317,22 +322,16 @@ def deduplicate_entities(entities: list[dict], mode: str = "local") -> list[dict
         if len(group) <= 1:
             merged.extend(group)
             continue
-
-        # Check for similar names within same type
         names = [e["name"] for e in group]
         duplicates = set()
-
         for i in range(len(names)):
-            if i in duplicates:
-                continue
-            for j in range(i + 1, len(names)):
-                if j in duplicates:
-                    continue
-                # Simple similarity: one contains the other, or >80% char overlap
+            if i in duplicates: continue
+            for j in range(i+1, len(names)):
+                if j in duplicates: continue
                 ni, nj = names[i].lower(), names[j].lower()
-                if ni in nj or nj in ni or _char_overlap(ni, nj) > 0.8:
-                    duplicates.add(j)  # Merge j into i
-
+                # One contains the other, or high char overlap
+                if ni in nj or nj in ni or _char_overlap(ni, nj) > 0.7:
+                    duplicates.add(j)
         for i, e in enumerate(group):
             if i not in duplicates:
                 merged.append(e)

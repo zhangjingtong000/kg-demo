@@ -1,0 +1,423 @@
+{
+  "nodes": [
+    {
+      "name": "Squats",
+      "type": "Exercise",
+      "description": "A compound exercise that targets multiple muscle groups"
+    },
+    {
+      "name": "Bench Press",
+      "type": "Exercise",
+      "description": "Upper body exercise performed lying on a flat bench pressing a barbell"
+    },
+    {
+      "name": "Quadriceps",
+      "type": "Muscle",
+      "description": "Muscle isolated by the leg press machine"
+    },
+    {
+      "name": "Hamstrings",
+      "type": "Muscle",
+      "description": "Muscle group targeted by squats"
+    },
+    {
+      "name": "Glutes",
+      "type": "Muscle",
+      "description": "Muscle group targeted by squats"
+    },
+    {
+      "name": "Pectoralis Major",
+      "type": "Muscle",
+      "description": "Primary muscle targeted by the bench press"
+    },
+    {
+      "name": "Body Weight",
+      "type": "Equipment",
+      "description": "One method of performing squats without added weight"
+    },
+    {
+      "name": "Barbell",
+      "type": "Equipment",
+      "description": "Equipment placed across the upper back for weighted squats"
+    },
+    {
+      "name": "Upper Back",
+      "type": "BodyPart",
+      "description": "Location where the barbell is placed during squats"
+    },
+    {
+      "name": "Chest",
+      "type": "BodyPart",
+      "description": "Body part that must be kept up for proper squat form"
+    },
+    {
+      "name": "Hips",
+      "type": "BodyPart",
+      "description": "Body part that descends below the knees in a squat"
+    },
+    {
+      "name": "Knees",
+      "type": "BodyPart",
+      "description": "Body part that the hips descend below during a squat"
+    },
+    {
+      "name": "",
+      "type": "COMPLETE",
+      "description": ""
+    },
+    {
+      "name": "Squat",
+      "type": "Squat",
+      "description": "Exercise"
+    },
+    {
+      "name": "Standing Position",
+      "type": "Standing Position",
+      "description": "BodyPart"
+    },
+    {
+      "name": "Deadlift",
+      "type": "Deadlift",
+      "description": "Exercise"
+    },
+    {
+      "name": "Posterior Chain",
+      "type": "Posterior Chain",
+      "description": "Concept"
+    },
+    {
+      "name": "Erector Spinae",
+      "type": "Erector Spinae",
+      "description": "Muscle"
+    },
+    {
+      "name": "Conventional Deadlift",
+      "type": "Conventional Deadlift",
+      "description": "Exercise"
+    },
+    {
+      "name": "Lifter",
+      "type": "Lifter",
+      "description": "Person"
+    },
+    {
+      "name": "Flat Back",
+      "type": "Flat Back",
+      "description": "Maintaining a neutral spine position during exercise"
+    },
+    {
+      "name": "Bar",
+      "type": "Bar",
+      "description": "The barbell gripped with both hands"
+    },
+    {
+      "name": "Spinal Loading",
+      "type": "Concept",
+      "description": "Reduced stress on the spine during leg press"
+    },
+    {
+      "name": "Planks",
+      "type": "Planks",
+      "description": "Exercise"
+    },
+    {
+      "name": "Russian Twists",
+      "type": "Russian Twists",
+      "description": "Exercise"
+    },
+    {
+      "name": "Rectus Abdominis",
+      "type": "Rectus Abdominis",
+      "description": "Muscle"
+    },
+    {
+      "name": "Transverse Abdominis",
+      "type": "Transverse Abdominis",
+      "description": "Muscle"
+    },
+    {
+      "name": "Obliques",
+      "type": "Obliques",
+      "description": "Muscle"
+    },
+    {
+      "name": "Medicine Ball",
+      "type": "Medicine Ball",
+      "description": "Equipment"
+    }
+  ],
+  "edges": [
+    {
+      "source": "Squats",
+      "target": "Quadriceps",
+      "type": "TRAINS",
+      "description": "TRAINS"
+    },
+    {
+      "source": "Squats",
+      "target": "Hamstrings",
+      "type": "TRAINS",
+      "description": "TRAINS"
+    },
+    {
+      "source": "Squats",
+      "target": "Glutes",
+      "type": "TRAINS",
+      "description": "TRAINS"
+    },
+    {
+      "source": "Squats",
+      "target": "Body Weight",
+      "type": "USES",
+      "description": "USES"
+    },
+    {
+      "source": "Squats",
+      "target": "Barbell",
+      "type": "USES",
+      "description": "USES"
+    },
+    {
+      "source": "Barbell",
+      "target": "Upper Back",
+      "type": "LOCATED_AT",
+      "description": "LOCATED_AT"
+    },
+    {
+      "source": "Squats",
+      "target": "Chest",
+      "type": "RELATED_TO",
+      "description": "RELATED_TO"
+    },
+    {
+      "source": "Squats",
+      "target": "Lower Back",
+      "type": "RELATED_TO",
+      "description": "RELATED_TO"
+    },
+    {
+      "source": "Squats",
+      "target": "Hips",
+      "type": "RELATED_TO",
+      "description": "RELATED_TO"
+    },
+    {
+      "source": "Squats",
+      "target": "Knees",
+      "type": "RELATED_TO",
+      "description": "RELATED_TO"
+    },
+    {
+      "source": "squat",
+      "target": "standing position",
+      "type": "PREREQUISITE",
+      "description": "The squat begins from a standing position."
+    },
+    {
+      "source": "squat",
+      "target": "hips",
+      "type": "RELATED_TO",
+      "description": "During a squat, the hips descend below the knees."
+    },
+    {
+      "source": "squat",
+      "target": "knees",
+      "type": "RELATED_TO",
+      "description": "During a squat, the hips descend below the knees."
+    },
+    {
+      "source": "deadlift",
+      "target": "posterior chain",
+      "type": "TRAINS",
+      "description": "Deadlifts engage the entire posterior chain."
+    },
+    {
+      "source": "deadlift",
+      "target": "erector spinae",
+      "type": "TRAINS",
+      "description": "Deadlifts engage the erector spinae."
+    },
+    {
+      "source": "deadlift",
+      "target": "glutes",
+      "type": "TRAINS",
+      "description": "Deadlifts engage the glutes."
+    },
+    {
+      "source": "deadlift",
+      "target": "hamstrings",
+      "type": "TRAINS",
+      "description": "Deadlifts engage the hamstrings."
+    },
+    {
+      "source": "conventional deadlift",
+      "target": "barbell",
+      "type": "USES",
+      "description": "The conventional deadlift uses a barbell."
+    },
+    {
+      "source": "conventional deadlift",
+      "target": "lifter",
+      "type": "RELATED_TO",
+      "description": "The lifter performs the conventional deadlift."
+    },
+    {
+      "source": "conventional deadlift",
+      "target": "hips",
+      "type": "RELATED_TO",
+      "description": "The lifter hinges at the hips during the conventional deadlift."
+    },
+    {
+      "source": "conventional deadlift",
+      "target": "flat back",
+      "type": "PREREQUISITE",
+      "description": "The lifter maintains a flat back during the conventional deadlift."
+    },
+    {
+      "source": "conventional deadlift",
+      "target": "bar",
+      "type": "USES",
+      "description": "The lifter grips the bar with both hands."
+    },
+    {
+      "source": "conventional deadlift",
+      "target": "knees",
+      "type": "RELATED_TO",
+      "description": "The lifter extends the knees to stand up."
+    },
+    {
+      "source": "posterior chain",
+      "target": "erector spinae",
+      "type": "PART_OF",
+      "description": "The erector spinae is part of the posterior chain."
+    },
+    {
+      "source": "posterior chain",
+      "target": "glutes",
+      "type": "PART_OF",
+      "description": "The glutes are part of the posterior chain."
+    },
+    {
+      "source": "posterior chain",
+      "target": "hamstrings",
+      "type": "PART_OF",
+      "description": "The hamstrings are part of the posterior chain."
+    },
+    {
+      "source": "squat",
+      "target": "deadlift",
+      "type": "SYNERGIST",
+      "description": "Both are compound movements that train similar muscle groups."
+    },
+    {
+      "source": "Flat Back",
+      "target": "Bar",
+      "type": "RELATED_TO",
+      "description": "Maintaining a flat back is part of the setup when gripping the bar."
+    },
+    {
+      "source": "Bar",
+      "target": "Hips",
+      "type": "RELATED_TO",
+      "description": "Standing up involves extending the hips while gripping the bar."
+    },
+    {
+      "source": "Bar",
+      "target": "Knees",
+      "type": "RELATED_TO",
+      "description": "Standing up involves extending the knees while gripping the bar."
+    },
+    {
+      "source": "Hips",
+      "target": "Knees",
+      "type": "SYNERGIST",
+      "description": "Hips and knees extend simultaneously during the standing movement."
+    },
+    {
+      "source": "Bench Press",
+      "target": "Pectoralis Major",
+      "type": "TRAINS",
+      "description": "Bench press targets the pectoralis major."
+    },
+    {
+      "source": "Bench Press",
+      "target": "Anterior Deltoids",
+      "type": "TRAINS",
+      "description": "Bench press targets the anterior deltoids."
+    },
+    {
+      "source": "Bench Press",
+      "target": "Triceps Brachii",
+      "type": "TRAINS",
+      "description": "Bench press targets the triceps brachii."
+    },
+    {
+      "source": "Bench Press",
+      "target": "Flat Bench",
+      "type": "USES",
+      "description": "Bench press is performed lying on a flat bench."
+    },
+    {
+      "source": "Bench Press",
+      "target": "Barbell",
+      "type": "USES",
+      "description": "Bench press involves pressing a barbell."
+    },
+    {
+      "source": "Leg Press Machine",
+      "target": "Squats",
+      "type": "RELATED_TO",
+      "description": "Leg press machine is an alternative to squats."
+    },
+    {
+      "source": "Leg Press Machine",
+      "target": "Quadriceps",
+      "type": "TRAINS",
+      "description": "Leg press machine isolates the quadriceps."
+    },
+    {
+      "source": "Leg Press Machine",
+      "target": "Spinal Loading",
+      "type": "RELATED_TO",
+      "description": "Leg press machine reduces spinal loading compared to squats."
+    },
+    {
+      "source": "Squats",
+      "target": "Spinal Loading",
+      "type": "RELATED_TO",
+      "description": "Squats involve spinal loading, which is reduced by the leg press machine."
+    },
+    {
+      "source": "Planks",
+      "target": "Rectus Abdominis",
+      "type": "TRAINS",
+      "description": "Planks engage the rectus abdominis for core stability."
+    },
+    {
+      "source": "Planks",
+      "target": "Transverse Abdominis",
+      "type": "TRAINS",
+      "description": "Planks engage the transverse abdominis for core stability."
+    },
+    {
+      "source": "Russian Twists",
+      "target": "Obliques",
+      "type": "TRAINS",
+      "description": "Russian twists target the obliques."
+    },
+    {
+      "source": "Russian Twists",
+      "target": "Medicine Ball",
+      "type": "USES",
+      "description": "Russian twists can be weighted with a medicine ball for progression."
+    }
+  ],
+  "timing": {
+    "entities_s": 11.8,
+    "relations_s": 11.6
+  },
+  "model": "cloud",
+  "model_text": "deepseek-chat",
+  "model_vision": null,
+  "chunks": 4
+}
