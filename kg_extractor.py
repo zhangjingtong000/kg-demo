@@ -100,7 +100,8 @@ def call_ollama(model: str, prompt: str, image_path: Optional[str] = None) -> st
         payload["images"] = [img_b64]
     r = requests.post(f"{OLLAMA}/api/generate", json=payload, timeout=120)
     r.raise_for_status()
-    return r.json()["response"]
+    data = r.json()
+    return data.get("response") or data.get("thinking", "")
 
 
 def call_siliconflow(model: str, prompt: str, image_path: Optional[str] = None) -> str:
