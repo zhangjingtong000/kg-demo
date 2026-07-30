@@ -26,6 +26,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { createGraphProfile, createSeededRandom, selectGraphProfile } from './kg-data/graph-profiles.mjs';
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#080c12');
@@ -67,7 +68,7 @@ const stars = new THREE.Points(starsGeo, new THREE.PointsMaterial({ color:'#6677
 scene.add(stars);
 
 // --- Graph ---
-const graphData = [
+const showcaseGraphData = [
   { pos:[-8,6,-3],   r:0.60, color:'#e8c170', label:'Deadlift' },
   { pos:[-5,9,2],    r:0.55, color:'#7db8d4', label:'Hip Flexor' },
   { pos:[-1,11,-4],  r:0.62, color:'#c9a0dc', label:'Core Stability' },
@@ -96,7 +97,7 @@ const graphData = [
   { pos:[5,5,-10],   r:0.54, color:'#b8a8d8', label:'Russian Twist' },
 ];
 
-const edges = [
+const showcaseEdges = [
   [0,1],[0,9],[0,10],[0,14],[1,2],[2,3],[2,16],[3,4],[4,5],[4,20],
   [5,6],[6,7],[7,8],[7,17],[8,9],[10,7],[10,11],[11,23],[5,12],[6,12],
   [8,12],[11,14],[9,14],[3,13],[13,5],[12,21],[12,14],[1,8],[10,14],
@@ -105,6 +106,17 @@ const edges = [
   [5,18],[6,20],[20,16],[21,13],[21,25],[22,16],[22,17],[7,23],[23,18],
   [23,10],[24,9],[24,8],[24,17],[25,12],[25,22],[25,0],[10,24],[11,19],[15,20],
 ];
+
+// The default page uses the exact S0 showcase data. Benchmark URLs only swap
+// the data set; meshes, labels, focus relayout and drag behaviour below remain
+// the production implementation.
+const graphSelection = selectGraphProfile(location.search);
+const selectedGraph = createGraphProfile(graphSelection.profile, graphSelection.seed);
+const graphData = selectedGraph.nodes;
+const edges = selectedGraph.edges;
+const layoutRandom = graphSelection.benchmark
+  ? createSeededRandom(graphSelection.seed ^ 0x4b475445)
+  : Math.random;
 
 // Shared adjacency
 const adjMap = new Map();
@@ -329,7 +341,7 @@ function radialLayout(focusIdx) {
   const t = new Array(graphData.length);
   for (let d=0;d<=3;d++) rings[d].forEach((ni,k) => {
     const ang=(k/rings[d].length)*Math.PI*2+d*0.5;
-    t[ni]=new THREE.Vector3(Math.cos(ang)*radii[d]+(Math.random()-0.5)*0.8, (d-1.2)*2.2+(Math.random()-0.5)*1.2, Math.sin(ang)*radii[d]+(Math.random()-0.5)*0.8);
+    t[ni]=new THREE.Vector3(Math.cos(ang)*radii[d]+(layoutRandom()-0.5)*0.8, (d-1.2)*2.2+(layoutRandom()-0.5)*1.2, Math.sin(ang)*radii[d]+(layoutRandom()-0.5)*0.8);
   });
   t[focusIdx].set(0,0,0);
   return t;
@@ -341,6 +353,27 @@ function updateLabels() {
     lbl.position.set(m.position.x, m.position.y+r+0.45, m.position.z);
     lbl.element.classList.toggle('focused', i===focusedIdx);
   });
+}
+
+if (graphSelection.benchmark) {
+  window.__kgBenchmark = {
+    profile: graphSelection.profile,
+    seed: graphSelection.seed,
+    getNodeScreenPosition(index) {
+      const point = nodeMeshes[index].mesh.position.clone().project(camera);
+      const bounds = renderer.domElement.getBoundingClientRect();
+      return {
+        x: bounds.left + (point.x + 1) * 0.5 * bounds.width,
+        y: bounds.top + (1 - point.y) * 0.5 * bounds.height,
+      };
+    },
+    getState() {
+      const movingNodes = nodeMeshes.reduce((count, { mesh }, index) => (
+        mesh.position.distanceTo(targets[index]) > 0.01 ? count + 1 : count
+      ), 0);
+      return { focusedIdx, movingNodes, springActive, nodes: graphData.length, edges: edges.length };
+    },
+  };
 }
 
 // --- Interaction ---
