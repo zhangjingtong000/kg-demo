@@ -77,7 +77,7 @@ export function createBenchmarkCollector({ warmupMs = 1500, sampleMs = 8000 } = 
         longTaskCount: longTasks.length,
         longTaskMs: longTasks.reduce((sum, value) => sum + value, 0),
         viewport: { width: window.innerWidth, height: window.innerHeight },
-        devicePixelRatio: window.devicePixelRatio,
+        devicePixelRatio: renderer.getPixelRatio(),
         drawCalls: renderer.info.render.calls,
         geometries: renderer.info.memory.geometries,
         textures: renderer.info.memory.textures,
