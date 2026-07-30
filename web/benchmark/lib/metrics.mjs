@@ -42,7 +42,9 @@ export function createBenchmarkCollector({ warmupMs = 1500, sampleMs = 8000 } = 
       entries.getEntries().forEach((entry) => longTasks.push(entry.duration));
     });
     try {
-      observer.observe({ type: 'longtask', buffered: true });
+      // Historical entries belong to earlier benchmark runs. Each collector must
+      // only report long tasks that occur after it is created.
+      observer.observe({ type: 'longtask' });
     } catch {
       observer.disconnect();
       observer = null;
