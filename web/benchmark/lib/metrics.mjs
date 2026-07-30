@@ -24,6 +24,10 @@ export function summarizeFrames(frameMs) {
   };
 }
 
+export function firstRenderDuration(createdAt, renderedAt) {
+  return Math.max(0, renderedAt - createdAt);
+}
+
 export function createBenchmarkCollector({ warmupMs = 1500, sampleMs = 8000 } = {}) {
   const frameMs = [];
   const longTasks = [];
