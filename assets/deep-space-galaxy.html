@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深空银河 · Deep Space Galaxy</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #app { position: fixed; inset: 0; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ================= 基础场景 ================= */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 5000);
+camera.position.set(0, 0, 0.01);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableZoom = false;
+controls.enablePan = false;
+controls.rotateSpeed = -0.15;
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.08;
+controls.minPolarAngle = 0;
+controls.maxPolarAngle = Math.PI;
+
+const R = 1600;
+
+/* ================= 共享 GLSL：噪声库 ================= */
+const NOISE_GLSL = `
+  vec3 hash33(vec3 p){
+    p = fract(p * vec3(443.897, 441.423, 437.195));
+    p += dot(p, p.yxz + 19.19);
+    return fract((p.xxy + p.yxx) * p.zyx) * 2.0 - 1.0;
+  }
+  float hash13(vec3 p){
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
+  }
+  float noise3(vec3 p){
+    vec3 i = floor(p), f = fract(p);
+    vec3 u = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(dot(hash33(i), f), dot(hash33(i+vec3(1,0,0)), f-vec3(1,0,0)), u.x),
+          mix(dot(hash33(i+vec3(0,1,0)), f-vec3(0,1,0)), dot(hash33(i+vec3(1,1,0)), f-vec3(1,1,0)), u.x), u.y),
+      mix(mix(dot(hash33(i+vec3(0,0,1)), f-vec3(0,0,1)), dot(hash33(i+vec3(1,0,1)), f-vec3(1,0,1)), u.x),
+          mix(dot(hash33(i+vec3(0,1,1)), f-vec3(0,1,1)), dot(hash33(i+vec3(1,1,1)), f-vec3(1,1,1)), u.x), u.y),
+      u.z);
+  }
+  float fbm(vec3 p){
+    float v = 0.0, a = 0.5;
+    for(int i = 0; i < 5; i++){
+      v += a * noise3(p);
+      p = p * 2.03 + vec3(1.7, 4.3, 2.1);
+      a *= 0.52;
+    }
+    return v;
+  }
+  float fbm2(vec3 p){
+    float v = 0.0, a = 0.5;
+    for(int i = 0; i < 3; i++){
+      v += a * noise3(p);
+      p = p * 2.1 + vec3(3.1, 1.2, 5.7);
+      a *= 0.5;
+    }
+    return v;
+  }
+`;
+
+/* ================= 星云：独立场景 + 半分辨率离屏 RT → scene.background ================= */
+const rtW = Math.floor(innerWidth * renderer.getPixelRatio() * 0.5);
+const rtH = Math.floor(innerHeight * renderer.getPixelRatio() * 0.5);
+const nebulaRT = new THREE.WebGLRenderTarget(rtW, rtH, {
+  depthBuffer: false,
+  minFilter: THREE.LinearFilter,
+  magFilter: THREE.LinearFilter,
+  type: THREE.HalfFloatType
+});
+scene.background = nebulaRT.texture;
+
+const nebulaScene = new THREE.Scene();
+const nebulaCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 5000);
+
+const nebulaUniforms = { uTime: { value: 0 } };
+const nebulaMat = new THREE.ShaderMaterial({
+  uniforms: nebulaUniforms,
+  side: THREE.BackSide,
+  depthWrite: false,
+  vertexShader: `
+    varying vec3 vDir;
+    void main(){
+      vDir = normalize(position);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    varying vec3 vDir;
+    ${NOISE_GLSL}
+    void main(){
+      vec3 d = normalize(vDir);
+      float t = uTime * 0.006;
+
+      vec3 axis = normalize(vec3(0.32, 1.0, 0.18));
+      float band = abs(dot(d, axis));
+      float bandMask = exp(-band * band * 6.5);
+
+      vec3 p = d * 3.2;
+      vec3 warp = vec3(
+        fbm(p + vec3(t, 0.0, -t)),
+        fbm(p + vec3(0.0, t, t) + 5.2),
+        fbm(p + vec3(-t, t, 0.0) + 9.7)
+      );
+      float n  = fbm(p + warp * 1.4 + vec3(t * 0.7));
+      float n2 = fbm(p * 2.6 - warp * 0.9 - vec3(t * 0.5));
+      float fil = fbm2(d * 7.5 + warp * 2.0);
+
+      float density = clamp(n * 0.65 + n2 * 0.45, 0.0, 1.0);
+      density = pow(density, 1.8);
+
+      vec3 cDeep    = vec3(0.012, 0.016, 0.045);
+      vec3 cBlue    = vec3(0.10, 0.22, 0.48);
+      vec3 cPurple  = vec3(0.32, 0.14, 0.50);
+      vec3 cMagenta = vec3(0.55, 0.18, 0.42);
+      vec3 cGold    = vec3(0.72, 0.45, 0.22);
+
+      float hueMix = smoothstep(0.1, 0.9, fbm2(d * 2.0 + vec3(3.3, t * 0.3, 1.1)));
+      vec3 neb = mix(cBlue, cPurple, hueMix);
+      neb = mix(neb, cMagenta, smoothstep(0.45, 0.85, n2) * 0.7);
+      neb = mix(neb, cGold, pow(max(n - 0.35, 0.0), 2.0) * 2.2);
+
+      vec3 col = cDeep;
+      col += neb * density * (0.55 + bandMask * 1.5);
+      col += neb * pow(max(fil, 0.0), 3.0) * bandMask * 0.9;
+      col += cGold * pow(bandMask, 3.0) * pow(density, 2.0) * 2.0;
+
+      float dust = smoothstep(0.55, 0.85, fbm(d * 6.0 + vec3(7.7, -t * 0.4, 2.2)));
+      col *= 1.0 - dust * bandMask * 0.75;
+      col *= 0.85 + 0.15 * smoothstep(0.0, 0.25, 1.0 - band);
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+});
+const nebulaRoot = new THREE.Group();
+nebulaRoot.add(new THREE.Mesh(new THREE.SphereGeometry(R, 32, 24), nebulaMat));
+nebulaScene.add(nebulaRoot);
+
+/* ================= 2. 三层星野 ================= */
+function makeStarLayer({ count, rMin, rMax, size, brightness, palette }) {
+  const pos = new Float32Array(count * 3);
+  const attr = new Float32Array(count * 4);
+  for (let i = 0; i < count; i++) {
+    const u = Math.random() * 2 - 1;
+    const th = Math.random() * Math.PI * 2;
+    const s = Math.sqrt(1 - u * u);
+    const r = rMin + Math.random() * (rMax - rMin);
+    pos[i * 3]     = s * Math.cos(th) * r;
+    pos[i * 3 + 1] = u * r;
+    pos[i * 3 + 2] = s * Math.sin(th) * r;
+
+    const mag = 0.2 + Math.pow(Math.random(), 1.5) * 0.8; // 硬地板0.2
+    attr[i * 4]     = size * (0.6 + mag * 1.3);
+    attr[i * 4 + 1] = Math.random() * Math.PI * 2;
+    attr[i * 4 + 2] = 0.4 + Math.random() * 2.2;
+    attr[i * 4 + 3] = Math.random();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aData', new THREE.BufferAttribute(attr, 4));
+
+  const uniforms = { uTime: { value: 0 }, uPixelRatio: { value: renderer.getPixelRatio() }, uBright: { value: brightness } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      attribute vec4 aData;
+      uniform float uTime, uPixelRatio, uBright;
+      varying float vTwinkle;
+      varying float vColorIdx;
+      void main(){
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float tw = sin(uTime * aData.z + aData.y) * 0.5 + 0.5;
+        float tw2 = sin(uTime * aData.z * 2.7 + aData.y * 1.3) * 0.5 + 0.5;
+        vTwinkle = mix(0.55, 1.0, tw * 0.7 + tw2 * 0.3);
+        vColorIdx = aData.w;
+        gl_PointSize = aData.x * uPixelRatio * (0.8 + 0.4 * tw) * (900.0 / -mv.z);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform float uBright;
+      varying float vTwinkle;
+      varying float vColorIdx;
+      void main(){
+        vec2 uv = gl_PointCoord - 0.5;
+        float d = length(uv);
+        float core = smoothstep(0.5, 0.0, d);
+        float glow = exp(-d * 9.0);
+        float a = core * core * 0.9 + glow * 0.55;
+        vec3 c = vec3(1.0);
+        if      (vColorIdx < 0.25) c = vec3(1.00, 0.88, 0.72);
+        else if (vColorIdx < 0.60) c = vec3(0.95, 0.97, 1.00);
+        else if (vColorIdx < 0.85) c = vec3(0.72, 0.84, 1.00);
+        else                       c = vec3(1.00, 0.72, 0.50);
+        gl_FragColor = vec4(c * uBright * vTwinkle, a * vTwinkle);
+        if (gl_FragColor.a < 0.01) discard;
+      }
+    `
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.userData.uniforms = uniforms;
+  return pts;
+}
+
+const layers = [
+  makeStarLayer({ count: 14000, rMin: 1300, rMax: 1500, size: 2.2, brightness: 0.85 }),
+  makeStarLayer({ count: 4000, rMin: 900,  rMax: 1250, size: 3.4, brightness: 1.0  }),
+  makeStarLayer({ count: 500,  rMin: 550,  rMax: 850,  size: 5.5, brightness: 1.25 }),
+];
+layers.forEach(l => scene.add(l));
+
+/* ================= 3. 银河带亮星簇 ================= */
+function makeBandStars(count) {
+  const axis = new THREE.Vector3(0.32, 1.0, 0.18).normalize();
+  const pos = new Float32Array(count * 3);
+  const attr = new Float32Array(count * 4);
+  for (let i = 0; i < count; i++) {
+    const v = new THREE.Vector3().randomDirection();
+    const dot = v.dot(axis);
+    v.addScaledVector(axis, -dot * (0.55 + Math.random() * 0.4)).normalize();
+    const r = 950 + Math.random() * 450;
+    pos.set([v.x * r, v.y * r, v.z * r], i * 3);
+    const mag = 0.2 + Math.pow(Math.random(), 1.5) * 0.8;
+    attr[i * 4]     = 2.0 * (0.6 + mag * 1.3);
+    attr[i * 4 + 1] = Math.random() * Math.PI * 2;
+    attr[i * 4 + 2] = 0.3 + Math.random() * 1.6;
+    attr[i * 4 + 3] = Math.random();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aData', new THREE.BufferAttribute(attr, 4));
+  const m = makeStarLayer({ count: 1, rMin: 1, rMax: 2, size: 1, brightness: 1 });
+  m.geometry.dispose(); m.material.dispose();
+  const layer = makeStarLayer({ count: 0, rMin: 0, rMax: 1, size: 1, brightness: 1 });
+  layer.geometry.dispose();
+  layer.geometry = geo;
+  layer.material.uniforms.uBright.value = 0.9;
+  return layer;
+}
+const bandStars = makeBandStars(8000);
+scene.add(bandStars);
+
+/* ================= 4. 漂浮微尘 ================= */
+const DUST_COUNT = 800;
+const dustPos = new Float32Array(DUST_COUNT * 3);
+const dustSeed = new Float32Array(DUST_COUNT * 3);
+for (let i = 0; i < DUST_COUNT; i++) {
+  const v = new THREE.Vector3().randomDirection().multiplyScalar(30 + Math.random() * 180);
+  dustPos.set([v.x, v.y, v.z], i * 3);
+  dustSeed.set([Math.random() * 100, Math.random() * 100, Math.random() * 100], i * 3);
+}
+const dustGeo = new THREE.BufferGeometry();
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+dustGeo.setAttribute('aSeed', new THREE.BufferAttribute(dustSeed, 3));
+const dustUniforms = { uTime: { value: 0 }, uPixelRatio: { value: renderer.getPixelRatio() } };
+const dustMat = new THREE.ShaderMaterial({
+  uniforms: dustUniforms,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexShader: `
+    attribute vec3 aSeed;
+    uniform float uTime, uPixelRatio;
+    varying float vA;
+    void main(){
+      vec3 p = position;
+      p.x += sin(uTime * 0.10 + aSeed.x) * 8.0;
+      p.y += cos(uTime * 0.08 + aSeed.y) * 8.0;
+      p.z += sin(uTime * 0.06 + aSeed.z) * 8.0;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      float dist = -mv.z;
+      vA = smoothstep(260.0, 120.0, dist) * smoothstep(6.0, 25.0, dist);
+      gl_PointSize = (2.5 + sin(aSeed.x) * 1.2) * uPixelRatio * (160.0 / dist);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    varying float vA;
+    void main(){
+      float d = length(gl_PointCoord - 0.5);
+      float a = exp(-d * 8.0) * vA * 0.35;
+      gl_FragColor = vec4(vec3(0.75, 0.82, 1.0), a);
+      if (a < 0.005) discard;
+    }
+  `
+});
+scene.add(new THREE.Points(dustGeo, dustMat));
+
+/* ================= 5. 流星（相机空间，保证屏幕上轨迹为直线） ================= */
+scene.add(camera); // 让相机子节点参与渲染
+
+const METEOR_DIST = 120;           // 相机局部空间中的深度
+const meteorGroup = new THREE.Group();
+camera.add(meteorGroup);
+
+function makeMeteorMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uAlpha: { value: 0 },       // 整体淡入淡出 0..1
+      uHead:  { value: 1 },       // 头部位置（uv.x 方向，1=前端）
+      uTail:  { value: 0.85 },    // 拖尾长度比例（头部向后延伸的比例）
+      uColor: { value: new THREE.Color(1.0, 0.98, 0.92) },
+    },
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uAlpha, uHead, uTail;
+      uniform vec3 uColor;
+      varying vec2 vUv;
+      void main(){
+        // uv.x: 0=尾端 1=头部方向; 头部当前位置 uHead，尾端 = uHead - uTail
+        float tailEnd = uHead - uTail;
+        float along = (vUv.x - tailEnd) / max(uTail, 1e-4); // 0(尾)..1(头)
+        if (along < 0.0 || along > 1.0) discard;
+
+        // 横向：极细的核心 + 微弱辉光
+        float lat = abs(vUv.y - 0.5) * 2.0;
+        float core = exp(-lat * lat * 28.0);
+        float glow = exp(-lat * lat * 6.0) * 0.25;
+
+        // 纵向：头部最亮，向尾部指数衰减
+        float headGlow = exp((along - 1.0) * 5.5);          // 拖尾衰减
+        float headBoost = exp((along - 1.0) * 30.0) * 2.5;  // 头部亮点增强
+
+        float a = (core + glow) * (headGlow + headBoost) * uAlpha;
+        vec3 col = uColor * (0.85 + 0.6 * along);
+        gl_FragColor = vec4(col * a, a);
+        if (a < 0.004) discard;
+      }
+    `
+  });
+}
+
+const meteors = [];         // 活动流星
+let nextMeteorAt = 1.5 + Math.random() * 2; // 首次出现时间（秒）
+
+function spawnMeteor(t) {
+  // 视锥半尺寸（在 METEOR_DIST 处）
+  const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)) * METEOR_DIST;
+  const halfW = halfH * camera.aspect;
+
+  // 随机方向（偏向横向划过，允许一定角度变化）
+  const angle = (Math.random() < 0.5 ? 1 : -1) * (Math.random() * 0.9 + 0.05); // 接近水平
+  const dir = new THREE.Vector2(Math.cos(angle), Math.sin(angle));
+
+  // 起点：从屏幕外一侧进入
+  const margin = Math.max(halfW, halfH) * 0.35 + 20;
+  const perp = new THREE.Vector2(-dir.y, dir.x);
+  const startOff = (Math.random() * 2 - 1) * halfH * 0.9;
+  const start = new THREE.Vector2(
+    -dir.x * (halfW + margin) + perp.x * startOff,
+    -dir.y * (halfH + margin) + perp.y * startOff
+  );
+  // 行程长度：确保穿出对侧
+  const travel = (halfW + margin) * 2 + Math.random() * halfW * 0.6;
+
+  const speed = 80 + Math.random() * 100;          // 慢一点，更有观赏性
+  const life = travel / speed;
+  const tailLen = 20 + Math.random() * 22;          // 拖尾长度（加长）
+
+  const geo = new THREE.PlaneGeometry(tailLen, 1.2);
+  const mat = makeMeteorMaterial();
+  // 偶尔带一点冷蓝色调
+  if (Math.random() < 0.35) mat.uniforms.uColor.value.setRGB(0.85, 0.92, 1.0);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 999;
+  meteorGroup.add(mesh);
+
+  meteors.push({
+    mesh, mat,
+    dir, start, speed, life, tailLen,
+    born: t,
+    fadeIn: 0.08 + Math.random() * 0.06,
+    fadeOut: 0.25 + Math.random() * 0.2,
+  });
+}
+
+function updateMeteors(t, dt) {
+  // 随机生成：间隔 2.5 ~ 8 秒
+  if (t >= nextMeteorAt) {
+    spawnMeteor(t);
+    // 偶尔连发双流星
+    if (Math.random() < 0.18) spawnMeteor(t + 0.05);
+    nextMeteorAt = t + 2.5 + Math.random() * 5.5;
+  }
+
+  for (let i = meteors.length - 1; i >= 0; i--) {
+    const m = meteors[i];
+    const age = t - m.born;
+    const k = age / m.life;
+    if (k >= 1) {
+      meteorGroup.remove(m.mesh);
+      m.mesh.geometry.dispose();
+      m.mat.dispose();
+      meteors.splice(i, 1);
+      continue;
+    }
+
+    // 头部位置（相机局部 XY 平面）
+    const hx = m.start.x + m.dir.x * m.speed * age;
+    const hy = m.start.y + m.dir.y * m.speed * age;
+
+    // 网格中心 = 头部往后半个拖尾
+    m.mesh.position.set(
+      hx - m.dir.x * m.tailLen * 0.5,
+      hy - m.dir.y * m.tailLen * 0.5,
+      -METEOR_DIST
+    );
+    m.mesh.rotation.z = Math.atan2(m.dir.y, m.dir.x);
+
+    // 淡入淡出
+    const aIn = Math.min(1, age / m.fadeIn);
+    const aOut = Math.min(1, (m.life - age) / m.fadeOut);
+    m.mat.uniforms.uAlpha.value = Math.min(aIn, aOut);
+  }
+}
+
+/* ================= 旋转组 ================= */
+const root = new THREE.Group();
+scene.children.slice().forEach(c => { if (c !== camera) root.add(c); });
+scene.add(root);
+
+/* ================= 动画循环 ================= */
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  // 星云同步旋转 + 渲染到半分辨率 RT
+  nebulaRoot.rotation.y += dt * 0.004;
+  nebulaRoot.rotation.x = Math.sin(t * 0.02) * 0.01;
+  nebulaCam.quaternion.copy(camera.quaternion);
+  nebulaUniforms.uTime.value = t;
+  renderer.setRenderTarget(nebulaRT);
+  renderer.render(nebulaScene, nebulaCam);
+  renderer.setRenderTarget(null);
+
+  // 主场景（自动用 nebulaRT.texture 作 background）
+  layers.forEach(l => l.userData.uniforms.uTime.value = t);
+  bandStars.material.uniforms.uTime.value = t;
+  dustUniforms.uTime.value = t;
+
+  root.rotation.y += dt * 0.004;
+  root.rotation.x = Math.sin(t * 0.02) * 0.01;
+
+  // 流星更新（相机空间，轨迹始终为屏幕直线）
+  updateMeteors(t, dt);
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ================= resize ================= */
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  nebulaCam.aspect = camera.aspect;
+  nebulaCam.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  const pr = renderer.getPixelRatio();
+  nebulaRT.setSize(Math.floor(innerWidth * pr * 0.5), Math.floor(innerHeight * pr * 0.5));
+  layers.forEach(l => l.userData.uniforms.uPixelRatio.value = pr);
+  dustUniforms.uPixelRatio.value = pr;
+});
+
+window.skybox = { scene, camera, renderer, controls, THREE };
+</script>
+</body>
+</html>

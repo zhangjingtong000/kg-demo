@@ -1,0 +1,18 @@
+# Python bytecode and local virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# JavaScript build/install artifacts
+**/node_modules/
+**/.next/
+
+# Local runtime, browser and brainstorming artifacts
+/data/
+/output/
+/.playwright-cli/
+/.superpowers/
+
+# Standalone visual reference project; maintained in its own Git repository.
+/isgalaxias/

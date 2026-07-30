@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KG × Galaxy</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; height: 100vh; font-family: "Inter","PingFang SC",system-ui,sans-serif; }
+  canvas { display: block; }
+  .node-label { color: rgba(255,255,255,0.85); font-size: 11px; letter-spacing: 0.03em; pointer-events: none; text-shadow: 0 0 8px rgba(0,0,0,0.8); white-space: nowrap; transition: all 0.3s ease; }
+  .node-label.focused { color: #fff; font-size: 13px; text-shadow: 0 0 14px rgba(150,180,255,0.9); }
+  .hint { position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.25); font-size: 11px; letter-spacing: 0.04em; pointer-events: none; }
+  .focus-indicator { position: absolute; top: 28px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.5); font-size: 13px; letter-spacing: 0.05em; pointer-events: none; opacity: 0; transition: opacity 0.4s; }
+  .focus-indicator.visible { opacity: 1; }
+  .focus-indicator span { color: #aac8ff; }
+</style>
+</head>
+<body>
+<div class="hint">drag to rotate | scroll to zoom | click node to focus | drag node to move</div>
+<div class="focus-indicator" id="focusLabel">focused on <span></span> &mdash; click empty space to unfocus</div>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const scene = new THREE.Scene();
+// Milky Way background (flat on scene, same as isgalaxias)
+const bgTexture = new THREE.TextureLoader().load('milky_way.jpg');
+bgTexture.colorSpace = THREE.SRGBColorSpace;
+scene.background = bgTexture;
+scene.backgroundIntensity = 0.5;
+scene.fog = new THREE.FogExp2('#000012', 0.000015);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.5, 200);
+camera.position.set(0, 10, 20);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0px';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.body.appendChild(labelRenderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.minDistance = 4; controls.maxDistance = 60;
+controls.target.set(0, 0, 0);
+controls.autoRotate = true; controls.autoRotateSpeed = 0.25;
+
+// === PARTICLE CLOUD (copied from isgalaxias, spherical distribution) ===
+const cloudCount = 80000;
+const cPos = new Float32Array(cloudCount * 3);
+const cCol = new Float32Array(cloudCount * 3);
+const cScl = new Float32Array(cloudCount);
+const cRnd = new Float32Array(cloudCount * 3);
+
+const insideColor = new THREE.Color('#ea7914');
+const outsideColor = new THREE.Color('#6c67aa');
+const innerR = 10, outerR = 22;
+const maxRadius = outerR;
+
+for (let i = 0; i < cloudCount; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  const radius = innerR + Math.random() * (outerR - innerR);
+
+  // Flatten Y like isgalaxias (mostly in XZ plane)
+  cPos[i*3] = Math.cos(theta) * Math.sin(phi) * radius;
+  cPos[i*3+1] = Math.sin(theta) * Math.sin(phi) * radius * 0.15;
+  cPos[i*3+2] = Math.cos(phi) * radius;
+
+  const col = insideColor.clone().lerp(outsideColor, radius / maxRadius);
+  cCol[i*3]=col.r; cCol[i*3+1]=col.g; cCol[i*3+2]=col.b;
+
+  cScl[i] = Math.random();
+  cRnd[i*3]=(Math.random()-0.5)*2; cRnd[i*3+1]=(Math.random()-0.5)*2; cRnd[i*3+2]=(Math.random()-0.5)*2;
+}
+
+const cloudGeo = new THREE.BufferGeometry();
+cloudGeo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
+cloudGeo.setAttribute('color', new THREE.BufferAttribute(cCol, 3));
+cloudGeo.setAttribute('aScale', new THREE.BufferAttribute(cScl, 1));
+cloudGeo.setAttribute('aRandom', new THREE.BufferAttribute(cRnd, 3));
+
+const cloudMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uSize: { value: 45 * Math.min(devicePixelRatio, 2) },
+    uTime: { value: 0 },
+  },
+  vertexShader: `attribute float aScale; attribute vec3 aRandom; attribute vec3 color;
+    varying vec3 vColor; uniform float uSize; uniform float uTime;
+    void main() {
+      vec4 mp = modelMatrix * vec4(position, 1.0);
+      float angle = atan(mp.x, mp.z);
+      float dist = length(mp.xy);
+      float offset = (1.0 / (dist + 0.01)) * uTime * 0.15;
+      angle += offset;
+      mp.x = cos(angle) * length(mp.xz);
+      mp.z = sin(angle) * length(mp.xz);
+      vec4 vp = viewMatrix * mp;
+      gl_Position = projectionMatrix * vp;
+      gl_PointSize = uSize * aScale * (1.0 / -vp.z);
+      vColor = color;
+    }`,
+  fragmentShader: `varying vec3 vColor;
+    void main() {
+      float strength = distance(gl_PointCoord, vec2(0.5));
+      strength = 1.0 - strength;
+      strength = pow(strength, 10.0);
+      vec3 col = mix(vec3(0.0), vColor, strength);
+      gl_FragColor = vec4(col * 0.6, 0.22);
+    }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const particleCloud = new THREE.Points(cloudGeo, cloudMat);
+scene.add(particleCloud);
+
+// === OUR KNOWLEDGE GRAPH (from index3d-bounce) ===
+const graphData = [
+  { pos:[-8,6,-3],   r:0.60, color:'#e8c170', label:'Deadlift' },
+  { pos:[-5,9,2],    r:0.55, color:'#7db8d4', label:'Hip Flexor' },
+  { pos:[-1,11,-4],  r:0.62, color:'#c9a0dc', label:'Core Stability' },
+  { pos:[4,10,1],    r:0.50, color:'#88c9a0', label:'Shoulder Press' },
+  { pos:[9,7,3],     r:0.64, color:'#e8a870', label:'Bench Press' },
+  { pos:[8,2,-4],    r:0.56, color:'#d4a0b0', label:'Triceps' },
+  { pos:[5,-3,5],    r:0.48, color:'#90b0d8', label:'Biceps Curl' },
+  { pos:[-1,-6,1],   r:0.66, color:'#c0b890', label:'Squat' },
+  { pos:[-8,-2,6],   r:0.58, color:'#a8c8b0', label:'Quadriceps' },
+  { pos:[-11,2,-3],  r:0.52, color:'#d0b8c8', label:'Lower Back' },
+  { pos:[-4,-1,-8],  r:0.60, color:'#b8c0d8', label:'Glutes' },
+  { pos:[7,-6,-2],   r:0.54, color:'#c8b8a0', label:'Hamstrings' },
+  { pos:[-5,4,9],    r:0.50, color:'#a0c0c8', label:'Lat Pulldown' },
+  { pos:[3,2,10],    r:0.56, color:'#c8a8b8', label:'Romanian DL' },
+  { pos:[-9,-6,-5],  r:0.46, color:'#98b8c8', label:'Calves' },
+  { pos:[11,-2,7],   r:0.58, color:'#e8d488', label:'Overhead Press' },
+  { pos:[-11,8,6],   r:0.52, color:'#c0a0e0', label:'Pull-up' },
+  { pos:[0,-10,-3],  r:0.62, color:'#d8c090', label:'Leg Press' },
+  { pos:[12,1,-7],   r:0.54, color:'#e0a8b0', label:'Chest Fly' },
+  { pos:[-6,-9,7],   r:0.50, color:'#b8d0c0', label:'Lunges' },
+  { pos:[8,8,8],     r:0.48, color:'#d0c8e8', label:'Face Pull' },
+  { pos:[-9,-1,11],  r:0.56, color:'#e8c888', label:'Hip Thrust' },
+  { pos:[1,7,-11],   r:0.58, color:'#c8b0d0', label:'Plank' },
+  { pos:[10,-9,0],   r:0.52, color:'#a8d8c8', label:'Calf Raise' },
+  { pos:[-13,-4,8],  r:0.48, color:'#d8b8a0', label:'Good Morning' },
+  { pos:[5,5,-10],   r:0.54, color:'#b8a8d8', label:'Russian Twist' },
+];
+
+const edges = [
+  [0,1],[0,9],[0,10],[0,14],[1,2],[2,3],[2,16],[3,4],[4,5],[4,20],
+  [5,6],[6,7],[7,8],[7,17],[8,9],[10,7],[10,11],[11,23],[5,12],[6,12],
+  [8,12],[11,14],[9,14],[3,13],[13,5],[12,21],[12,14],[1,8],[10,14],
+  [15,4],[15,18],[15,5],[16,3],[16,20],[17,7],[17,11],[17,14],
+  [8,19],[19,11],[19,14],[19,17],[0,25],[1,21],[2,22],[3,24],[4,23],
+  [5,18],[6,20],[20,16],[21,13],[21,25],[22,16],[22,17],[7,23],[23,18],
+  [23,10],[24,9],[24,8],[24,17],[25,12],[25,22],[25,0],[10,24],[11,19],[15,20],
+];
+
+// Shared adjacency
+const adjMap = new Map();
+edges.forEach(([a,b]) => { if(!adjMap.has(a))adjMap.set(a,[]); if(!adjMap.has(b))adjMap.set(b,[]); adjMap.get(a).push(b); adjMap.get(b).push(a); });
+
+function createGlowBeam(p1, p2, c1, c2, radiusMid, segments) {
+  const dir = new THREE.Vector3().subVectors(p2, p1); const len = dir.length(); dir.normalize();
+  const up = new THREE.Vector3(0,1,0); if (Math.abs(dir.dot(up))>0.999) up.set(1,0,0);
+  const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+  const forward = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const rings = 6, pos = [], cols = [], idx = [], nml = [];
+  for (let i=0;i<=segments;i++) {
+    const t=i/segments, center=p1.clone().add(dir.clone().multiplyScalar(t*len));
+    const r=radiusMid*(0.78+0.22*Math.sin(t*Math.PI));
+    const mc=c1.clone().lerp(c2,t), b=Math.sin(t*Math.PI);
+    for (let j=0;j<rings;j++) {
+      const a=(j/rings)*Math.PI*2;
+      pos.push(center.x+right.x*Math.cos(a)*r+forward.x*Math.sin(a)*r, center.y+right.y*Math.cos(a)*r+forward.y*Math.sin(a)*r, center.z+right.z*Math.cos(a)*r+forward.z*Math.sin(a)*r);
+      cols.push(mc.r*b, mc.g*b, mc.b*b);
+      nml.push(right.x*Math.cos(a)+forward.x*Math.sin(a), right.y*Math.cos(a)+forward.y*Math.sin(a), right.z*Math.cos(a)+forward.z*Math.sin(a));
+    }
+  }
+  for (let i=0;i<segments;i++) for (let j=0;j<rings;j++) { const a=i*rings+j,b=i*rings+((j+1)%rings),c=(i+1)*rings+j,d=(i+1)*rings+((j+1)%rings); idx.push(a,b,c); idx.push(b,d,c); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nml,3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+
+// Node meshes
+const nodeMeshes = [], nodeLabels = [];
+const nodeGroup = new THREE.Group(), labelGroup = new THREE.Group();
+
+// Lights
+scene.add(new THREE.AmbientLight('#222244', 0.6));
+const key = new THREE.DirectionalLight('#ffffff', 1.5); key.position.set(15, 20, 10); scene.add(key);
+scene.add(new THREE.DirectionalLight('#667799', 0.6));
+
+graphData.forEach((data, idx) => {
+  const { pos, r, color } = data;
+  const col = new THREE.Color(color);
+  const hsl = {}; col.getHSL(hsl);
+  const glassColor = new THREE.Color().setHSL(hsl.h, hsl.s*0.6, Math.min(1, hsl.l*1.35));
+
+  const geo = new THREE.SphereGeometry(r, 48, 48);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: glassColor },
+      uLightDir: { value: new THREE.Vector3(0.55,0.7,0.4).normalize() },
+      uLightDir2: { value: new THREE.Vector3(-0.3,-0.15,-0.35).normalize() },
+      uCameraPos: { value: new THREE.Vector3() },
+      uHover: { value: 0 },
+    },
+    vertexShader: `varying vec3 vWPos,vWNormal;void main(){vec4 wp=modelMatrix*vec4(position,1.0);vWPos=wp.xyz;vWNormal=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader: `varying vec3 vWPos,vWNormal;uniform vec3 uColor,uLightDir,uLightDir2,uCameraPos;uniform float uHover;
+void main(){vec3 N=normalize(vWNormal),V=normalize(uCameraPos-vWPos);float f=pow(1.0-abs(dot(V,N)),3.5);
+vec3 H1=normalize(uLightDir+V),H2=normalize(uLightDir2+V);float s1=pow(max(dot(N,H1),0.0),180.0),s2=pow(max(dot(N,H2),0.0),80.0);
+float d=max(dot(N,uLightDir),0.0)*0.25+0.1,hb=1.0+uHover*0.5;
+vec3 body=uColor*(d+0.35)*hb;float ba=0.12*hb;
+vec3 edge=uColor*2.2*f*hb;float ea=f*0.40*hb;
+float sp=s1*0.85+s2*0.45;
+gl_FragColor=vec4(body+edge+sp*vec3(1.0),clamp(ba+ea+sp*0.85,0.0,1.0));}`,
+    transparent: true, depthWrite: true,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(pos[0], pos[1], pos[2]);
+
+  const glowGeo = new THREE.SphereGeometry(r*1.9, 16, 16);
+  const glowMat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: col.clone() }, uGlowOpacity: { value: 1.0 } },
+    vertexShader: `varying vec3 vN,vP;void main(){vec4 wp=modelMatrix*vec4(position,1.0);vP=wp.xyz;vN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader: `varying vec3 vN,vP;uniform vec3 uColor;uniform float uGlowOpacity;void main(){vec3 V=normalize(cameraPosition-vP);float f=1.0-abs(dot(V,vN));gl_FragColor=vec4(uColor,f*f*0.22*uGlowOpacity);}`,
+    transparent: true, depthWrite: false,
+  });
+  mesh.add(new THREE.Mesh(glowGeo, glowMat));
+  mesh.userData = { idx };
+  nodeGroup.add(mesh);
+  nodeMeshes.push({ mesh, data, idx });
+
+  const labelDiv = document.createElement('div');
+  labelDiv.className = 'node-label'; labelDiv.textContent = data.label;
+  const labelObj = new CSS2DObject(labelDiv);
+  labelObj.position.set(pos[0], pos[1]+r+0.45, pos[2]);
+  labelGroup.add(labelObj);
+  nodeLabels.push(labelObj);
+});
+scene.add(nodeGroup); scene.add(labelGroup);
+
+// Connection objects
+const connectionsGroup = new THREE.Group();
+const edgeObjects = [];
+
+function createEdgeMeshes(p1, p2, c1, c2) {
+  const mg = createGlowBeam(p1,p2,c1,c2,0.022,40);
+  const main = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:0.35, blending:THREE.AdditiveBlending, depthWrite:false }));
+  const cg = createGlowBeam(p1,p2,c1,c2,0.032,30);
+  const core = new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:0.18, blending:THREE.AdditiveBlending, depthWrite:false }));
+  return { main, core };
+}
+
+function updateEdgeGeometry(mesh, p1, p2, c1, c2, radiusMid) {
+  const dir = new THREE.Vector3().subVectors(p2, p1); const len = dir.length(); dir.normalize();
+  const up = new THREE.Vector3(0,1,0); if (Math.abs(dir.dot(up))>0.999) up.set(1,0,0);
+  const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+  const forward = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const rings = 6, segments = radiusMid > 0.03 ? 30 : 40;
+  const posArr = mesh.geometry.attributes.position.array;
+  const colArr = mesh.geometry.attributes.color.array;
+  for (let i=0;i<=segments;i++) {
+    const t=i/segments, center=p1.clone().add(dir.clone().multiplyScalar(t*len));
+    const r=radiusMid*(0.78+0.22*Math.sin(t*Math.PI));
+    const mc=c1.clone().lerp(c2,t), b=Math.sin(t*Math.PI);
+    for (let j=0;j<rings;j++) {
+      const a=(j/rings)*Math.PI*2, vi=(i*rings+j)*3;
+      posArr[vi]=center.x+right.x*Math.cos(a)*r+forward.x*Math.sin(a)*r;
+      posArr[vi+1]=center.y+right.y*Math.cos(a)*r+forward.y*Math.sin(a)*r;
+      posArr[vi+2]=center.z+right.z*Math.cos(a)*r+forward.z*Math.sin(a)*r;
+      colArr[vi]=mc.r*b; colArr[vi+1]=mc.g*b; colArr[vi+2]=mc.b*b;
+    }
+  }
+  mesh.geometry.attributes.position.needsUpdate = true;
+  mesh.geometry.attributes.color.needsUpdate = true;
+}
+
+function refreshEdgePositions() {
+  edgeObjects.forEach(eo => {
+    const p1 = nodeMeshes[eo.from].mesh.position, p2 = nodeMeshes[eo.to].mesh.position;
+    const c1 = new THREE.Color(graphData[eo.from].color), c2 = new THREE.Color(graphData[eo.to].color);
+    updateEdgeGeometry(eo.main, p1, p2, c1, c2, 0.022);
+    updateEdgeGeometry(eo.core, p1, p2, c1, c2, 0.032);
+  });
+}
+
+function setEdgeHighlight(hoveredIdx) {
+  edgeObjects.forEach(eo => {
+    const on = hoveredIdx===null || eo.from===hoveredIdx || eo.to===hoveredIdx;
+    eo.main.material.opacity = on ? 0.45 : 0.04;
+    eo.core.material.opacity = on ? 0.25 : 0.02;
+  });
+}
+
+edges.forEach(([from, to]) => {
+  const p1 = nodeMeshes[from].mesh.position, p2 = nodeMeshes[to].mesh.position;
+  const c1 = new THREE.Color(graphData[from].color), c2 = new THREE.Color(graphData[to].color);
+  const objs = createEdgeMeshes(p1, p2, c1, c2);
+  connectionsGroup.add(objs.main); connectionsGroup.add(objs.core);
+  edgeObjects.push({ ...objs, from, to });
+});
+scene.add(connectionsGroup);
+
+// === STATE (from bounce version) ===
+let focusedIdx = null, hoveredIdx = null;
+const origPos = graphData.map(d => new THREE.Vector3(...d.pos));
+let targets = origPos.map(p => p.clone());
+let dirty = false, didDrag = false;
+let curGlowAlpha = graphData.map(() => 1.0);
+let tgtGlowAlpha = graphData.map(() => 1.0);
+let curEdgeAlpha = edges.map(() => 1.0);
+let tgtEdgeAlpha = edges.map(() => 1.0);
+const DIFF_LERP = 2.5;
+let focusRing = null;
+let restPositions = origPos.map(p => p.clone());
+let springVels = graphData.map(() => new THREE.Vector3());
+let springActive = false;
+const SPRING_K = 8, SPRING_DAMP = 0.7;
+const focusCam = new THREE.Vector3(0, 10, 14);
+
+function bfs(startIdx) {
+  const dist = new Map(), q = [startIdx]; dist.set(startIdx, 0);
+  while (q.length) { const u=q.shift(); for(const v of(adjMap.get(u)||[])) if(!dist.has(v)){ dist.set(v,dist.get(u)+1); q.push(v); } }
+  return dist;
+}
+
+function radialLayout(focusIdx) {
+  const dist = bfs(focusIdx), radii = [0,5,9.5,14], rings = [[],[],[],[]];
+  for (let i=0;i<graphData.length;i++) { const d=dist.has(i)?Math.min(dist.get(i),3):3; rings[d].push(i); }
+  const t = new Array(graphData.length);
+  for (let d=0;d<=3;d++) rings[d].forEach((ni,k) => {
+    const ang=(k/rings[d].length)*Math.PI*2+d*0.5;
+    t[ni]=new THREE.Vector3(Math.cos(ang)*radii[d]+(Math.random()-0.5)*0.8, (d-1.2)*2.2+(Math.random()-0.5)*1.2, Math.sin(ang)*radii[d]+(Math.random()-0.5)*0.8);
+  });
+  t[focusIdx].set(0,0,0);
+  return t;
+}
+
+function setFocusDiffusion(fi) {
+  if (fi === null) { tgtGlowAlpha.forEach((_,i)=>tgtGlowAlpha[i]=1.0); tgtEdgeAlpha.forEach((_,i)=>tgtEdgeAlpha[i]=1.0); return; }
+  const dist = bfs(fi);
+  for (let i=0;i<graphData.length;i++) { const d=dist.has(i)?dist.get(i):999; tgtGlowAlpha[i]=d===0?1.0:d===1?0.7:d===2?0.4:d===3?0.18:0.06; }
+  edges.forEach(([f,t],k)=>{ const df=dist.has(f)?dist.get(f):999,dt=dist.has(t)?dist.get(t):999; const d=Math.min(df,dt); tgtEdgeAlpha[k]=d===0?1.0:d===1?0.55:d===2?0.25:d===3?0.1:0.04; });
+}
+
+function showFocusRing(nodeMesh, colorHex, nodeR) {
+  if (focusRing) { focusRing.geometry.dispose(); focusRing.material.dispose(); scene.remove(focusRing); }
+  const col = new THREE.Color(colorHex).multiplyScalar(1.8);
+  const geo = new THREE.TorusGeometry(nodeR*1.15, 0.06, 6, 16);
+  const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
+  focusRing = new THREE.Mesh(geo, mat);
+  focusRing.position.copy(nodeMesh.position);
+  scene.add(focusRing);
+}
+function hideFocusRing() { if (focusRing) { focusRing.geometry.dispose(); focusRing.material.dispose(); scene.remove(focusRing); focusRing = null; } }
+
+function updateLabels() {
+  nodeLabels.forEach((lbl,i) => {
+    const m=nodeMeshes[i].mesh, r=graphData[i].r;
+    lbl.position.set(m.position.x, m.position.y+r+0.45, m.position.z);
+    lbl.element.classList.toggle('focused', i===focusedIdx);
+  });
+}
+
+// === INTERACTION ===
+const raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let dragNode = null, dragPlane = new THREE.Plane(), dragOffset = new THREE.Vector3();
+let hoverTimeout = null, mouseDownPos = new THREE.Vector2();
+
+function getMeshes(){ return nodeMeshes.map(n=>n.mesh); }
+function findHitNode(e){ mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-(e.clientY/innerHeight)*2+1; raycaster.setFromCamera(mouse, camera); const hits=raycaster.intersectObjects(getMeshes(),false); return(hits.length>0&&hits[0].object.userData.idx!==undefined)?hits[0]:null; }
+
+renderer.domElement.addEventListener('mousedown', (e) => {
+  mouseDownPos.set(e.clientX, e.clientY);
+  clearTimeout(hoverTimeout);
+  const hit = findHitNode(e);
+  if (hit) {
+    dragNode = hit.object; didDrag = false; springActive = false;
+    nodeMeshes.forEach(({mesh},i) => restPositions[i].copy(mesh.position));
+    controls.enabled = false;
+    const normal = camera.getWorldDirection(new THREE.Vector3()).clone();
+    dragPlane.set(normal, -dragNode.position.dot(normal));
+    raycaster.setFromCamera(mouse, camera);
+    const pt = new THREE.Vector3(); raycaster.ray.intersectPlane(dragPlane, pt);
+    dragOffset.copy(pt).sub(dragNode.position);
+  }
+});
+
+renderer.domElement.addEventListener('mousemove', (e) => {
+  if (dragNode) {
+    mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-(e.clientY/innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    const pt = new THREE.Vector3(); raycaster.ray.intersectPlane(dragPlane, pt);
+    if (pt) {
+      const newPos = pt.clone().sub(dragOffset);
+      const idx = dragNode.userData.idx, delta = newPos.clone().sub(dragNode.position);
+      dragNode.position.copy(newPos); targets[idx].copy(newPos); didDrag = true;
+      const dist = bfs(idx);
+      nodeMeshes.forEach(({mesh},i) => { if(i===idx)return; const d=dist.has(i)?dist.get(i):999; if(d>3)return; const decay=Math.pow(0.35,d); mesh.position.x+=delta.x*decay; mesh.position.y+=delta.y*decay; mesh.position.z+=delta.z*decay; targets[i].copy(mesh.position); });
+      dirty = true;
+    }
+  } else {
+    const hit = findHitNode(e);
+    const targetIdx = hit ? hit.object.userData.idx : null;
+    if (targetIdx !== hoveredIdx) {
+      clearTimeout(hoverTimeout);
+      if (targetIdx === null) {
+        hoveredIdx = null; setEdgeHighlight(null);
+        nodeMeshes.forEach(({mesh}) => { if(mesh.children.length>0)mesh.children[0].visible=true; if(mesh.material.uniforms)mesh.material.uniforms.uHover.value=0; });
+      } else {
+        hoverTimeout = setTimeout(() => {
+          hoveredIdx = targetIdx; setEdgeHighlight(hoveredIdx);
+          const neighborSet = new Set([hoveredIdx, ...(adjMap.get(hoveredIdx)||[])]);
+          nodeMeshes.forEach(({mesh},i) => { const on=neighborSet.has(i); if(mesh.children.length>0)mesh.children[0].visible=on; if(mesh.material.uniforms)mesh.material.uniforms.uHover.value=(i===hoveredIdx)?1:0; });
+        }, 150);
+      }
+    }
+  }
+});
+
+renderer.domElement.addEventListener('mouseup', () => {
+  if (dragNode) { dragNode = null; controls.enabled = true; springVels.forEach(v=>v.set(0,0,0)); springActive = true; }
+});
+renderer.domElement.addEventListener('mouseleave', () => {
+  if (dragNode) { dragNode = null; controls.enabled = true; }
+  clearTimeout(hoverTimeout); hoveredIdx = null; setEdgeHighlight(null);
+  nodeMeshes.forEach(({mesh}) => { if(mesh.children.length>0)mesh.children[0].visible=true; if(mesh.material.uniforms)mesh.material.uniforms.uHover.value=0; });
+});
+renderer.domElement.addEventListener('click', (e) => {
+  const mdx=e.clientX-mouseDownPos.x, mdy=e.clientY-mouseDownPos.y;
+  if (didDrag || Math.sqrt(mdx*mdx+mdy*mdy)>3) return;
+  const hit = findHitNode(e);
+  if (hit) {
+    springActive = false; focusedIdx = hit.object.userData.idx;
+    targets = radialLayout(focusedIdx); setFocusDiffusion(focusedIdx);
+    camera.position.copy(focusCam); controls.target.set(0,0,0);
+    showFocusRing(nodeMeshes[focusedIdx].mesh, graphData[focusedIdx].color, graphData[focusedIdx].r);
+  } else {
+    springActive = false; focusedIdx = null; hideFocusRing();
+    targets = origPos.map(p=>p.clone()); setFocusDiffusion(null);
+  }
+  dirty = true;
+  const el=document.getElementById('focusLabel'), sp=el.querySelector('span');
+  if (focusedIdx!==null){ sp.textContent=graphData[focusedIdx].label; el.classList.add('visible'); }
+  else el.classList.remove('visible');
+  updateLabels();
+});
+
+// === RENDER ===
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(),0.1), elapsed = performance.now()*0.001;
+  controls.update();
+
+  // Spring-back
+  let moving = false;
+  if (springActive && !dragNode) {
+    let settled = true;
+    nodeMeshes.forEach(({mesh},i) => {
+      const dx=restPositions[i].x-mesh.position.x, dy=restPositions[i].y-mesh.position.y, dz=restPositions[i].z-mesh.position.z;
+      if (Math.sqrt(dx*dx+dy*dy+dz*dz)>0.005||springVels[i].length()>0.005) settled=false;
+      springVels[i].x+=dx*SPRING_K*dt; springVels[i].y+=dy*SPRING_K*dt; springVels[i].z+=dz*SPRING_K*dt;
+      springVels[i].multiplyScalar(SPRING_DAMP);
+      mesh.position.x+=springVels[i].x*dt; mesh.position.y+=springVels[i].y*dt; mesh.position.z+=springVels[i].z*dt;
+      targets[i].copy(mesh.position);
+    });
+    if (settled) { springActive=false; springVels.forEach(v=>v.set(0,0,0)); }
+    moving = true;
+  }
+  // Focus animation
+  else if (focusedIdx !== null) {
+    nodeMeshes.forEach(({mesh},i) => {
+      if (dragNode && mesh===dragNode) { moving=true; return; }
+      const t=targets[i], dx=t.x-mesh.position.x, dy=t.y-mesh.position.y, dz=t.z-mesh.position.z;
+      if (Math.sqrt(dx*dx+dy*dy+dz*dz)>0.01) { moving=true; mesh.position.x+=dx*3.0*dt; mesh.position.y+=dy*3.0*dt; mesh.position.z+=dz*3.0*dt; }
+    });
+  }
+
+  if (moving||dirty) { refreshEdgePositions(); updateLabels(); dirty=false; }
+
+  // Diffusion alpha
+  if (hoveredIdx === null) {
+    for (let i=0;i<graphData.length;i++) { curGlowAlpha[i]+=(tgtGlowAlpha[i]-curGlowAlpha[i])*DIFF_LERP*dt; const m=nodeMeshes[i].mesh; if(m.children.length>0)m.children[0].material.uniforms.uGlowOpacity.value=curGlowAlpha[i]; }
+  }
+  if (hoveredIdx===null && focusedIdx!==null) {
+    for (let k=0;k<edges.length;k++) { curEdgeAlpha[k]+=(tgtEdgeAlpha[k]-curEdgeAlpha[k])*DIFF_LERP*dt; const eo=edgeObjects[k]; if(eo){eo.main.material.opacity=0.45*curEdgeAlpha[k];eo.core.material.opacity=0.25*curEdgeAlpha[k];} }
+  }
+
+  // Particle cloud: update time for rotation shader
+  cloudMat.uniforms.uTime.value = elapsed;
+  particleCloud.rotation.y += dt * 0.02;
+
+  nodeMeshes.forEach(({mesh}) => { if(mesh.material.uniforms)mesh.material.uniforms.uCameraPos.value.copy(camera.position); });
+
+
+  nodeMeshes.forEach(({mesh},i) => { const tgt=(i===focusedIdx)?1.45:1.0, cur=mesh.scale.x; mesh.scale.setScalar(cur+(tgt-cur)*4.0*dt); });
+  if (focusedIdx!==null) { const fm=nodeMeshes[focusedIdx].mesh, p=1+Math.sin(elapsed*4.0)*0.04; fm.scale.setScalar(fm.scale.x+(p-fm.scale.x)*0.3); }
+  if (focusRing) { const fm=nodeMeshes[focusedIdx].mesh; focusRing.position.copy(fm.position); focusRing.lookAt(camera.position); focusRing.scale.setScalar(fm.scale.x); }
+
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+animate();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);labelRenderer.setSize(innerWidth,innerHeight);});
+</script>
+</body>
+</html>
