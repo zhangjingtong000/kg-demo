@@ -8,4 +8,5 @@ test('exploration composition keeps a passive background behind a transparent KG
   assert.match(page, /deep-space-galaxy\.html\?passive=1/);
   assert.match(page, /index3d-bounce\.html\?transparentBackground=1/);
   assert.match(page, /\.background-layer\s*\{[^}]*pointer-events:\s*none/s);
+  assert.match(page, /\.show-guides::before/);
 });

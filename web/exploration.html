@@ -9,10 +9,18 @@
   .layer { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
   .background-layer { z-index: 0; pointer-events: none; }
   .graph-layer { z-index: 1; background: transparent; }
+  .show-guides::before, .show-guides::after { content: ""; position: fixed; z-index: 2; pointer-events: none; opacity: 0.75; }
+  .show-guides::before { top: 0; bottom: 0; left: 50vw; width: 1px; background: rgba(255, 96, 128, 0.9); }
+  .show-guides::after { left: 0; right: 0; top: 50vh; height: 1px; background: rgba(255, 96, 128, 0.9); }
 </style>
 </head>
 <body>
   <iframe class="layer background-layer" title="深空背景" src="../assets/deep-space-galaxy.html?passive=1"></iframe>
   <iframe class="layer graph-layer" title="知识图谱" src="index3d-bounce.html?transparentBackground=1"></iframe>
+  <script>
+    if (new URLSearchParams(location.search).get('guides') === '1') {
+      document.body.classList.add('show-guides');
+    }
+  </script>
 </body>
 </html>
