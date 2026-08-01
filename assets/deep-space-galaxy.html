@@ -24,6 +24,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+const passiveMode = new URLSearchParams(location.search).get('passive') === '1';
+
 /* ================= 基础场景 ================= */
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -42,7 +44,8 @@ controls.enablePan = false;
 controls.rotateSpeed = -0.15;
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
-controls.autoRotate = true;
+controls.enabled = !passiveMode;
+controls.autoRotate = !passiveMode;
 controls.autoRotateSpeed = 0.08;
 controls.minPolarAngle = 0;
 controls.maxPolarAngle = Math.PI;
@@ -489,8 +492,10 @@ function animate() {
   bandStars.material.uniforms.uTime.value = t;
   dustUniforms.uTime.value = t;
 
-  root.rotation.y += dt * 0.004;
-  root.rotation.x = Math.sin(t * 0.02) * 0.01;
+  if (!passiveMode) {
+    root.rotation.y += dt * 0.004;
+    root.rotation.x = Math.sin(t * 0.02) * 0.01;
+  }
 
   // 流星更新（相机空间，轨迹始终为屏幕直线）
   updateMeteors(t, dt);

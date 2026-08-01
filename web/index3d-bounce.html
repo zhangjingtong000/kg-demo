@@ -7,6 +7,7 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #080c12; overflow: hidden; height: 100vh; font-family: "Inter","PingFang SC",system-ui,sans-serif; }
+  body.transparent-layer { background: transparent; }
   canvas { display: block; }
   .node-label { color: rgba(255,255,255,0.85); font-size: 11px; letter-spacing: 0.03em; pointer-events: none; text-shadow: 0 0 8px rgba(0,0,0,0.8); white-space: nowrap; transition: all 0.3s ease; }
   .node-label.focused { color: #fff; font-size: 13px; text-shadow: 0 0 14px rgba(150,180,255,0.9); }
@@ -28,16 +29,20 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createGraphProfile, createSeededRandom, selectGraphProfile } from './kg-data/graph-profiles.mjs';
 
+const transparentBackground = new URLSearchParams(location.search).get('transparentBackground') === '1';
+if (transparentBackground) document.body.classList.add('transparent-layer');
+
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#080c12');
-scene.fog = new THREE.FogExp2('#080c12', 0.00006);
+scene.background = transparentBackground ? null : new THREE.Color('#080c12');
+scene.fog = transparentBackground ? null : new THREE.FogExp2('#080c12', 0.00006);
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.5, 200);
 camera.position.set(0, 22, 30);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: transparentBackground });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000, transparentBackground ? 0 : 1);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 document.body.appendChild(renderer.domElement);
@@ -65,6 +70,7 @@ const N_STARS = 600, starPos = new Float32Array(N_STARS*3);
 for (let i=0;i<N_STARS;i++) { starPos[i*3]=(Math.random()-0.5)*60; starPos[i*3+1]=(Math.random()-0.5)*40; starPos[i*3+2]=(Math.random()-0.5)*50; }
 starsGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
 const stars = new THREE.Points(starsGeo, new THREE.PointsMaterial({ color:'#667799', size:0.04, blending:THREE.AdditiveBlending, depthWrite:false, transparent:true, opacity:0.7 }));
+stars.visible = !transparentBackground;
 scene.add(stars);
 
 // --- Graph ---
