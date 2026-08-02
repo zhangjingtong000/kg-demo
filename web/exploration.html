@@ -18,8 +18,17 @@
   <iframe class="layer background-layer" title="深空背景" src="../assets/deep-space-galaxy.html?passive=1"></iframe>
   <iframe class="layer graph-layer" title="知识图谱" src="index3d-bounce.html?transparentBackground=1"></iframe>
   <script>
-    if (new URLSearchParams(location.search).get('guides') === '1') {
+    const params = new URLSearchParams(location.search);
+    if (params.get('guides') === '1') {
       document.body.classList.add('show-guides');
+    }
+    const benchmark = params.get('benchmark');
+    if (/^S[0-4]$/.test(benchmark ?? '')) {
+      const seed = params.get('seed');
+      const graphUrl = `index3d-bounce.html?transparentBackground=1&benchmark=${encodeURIComponent(benchmark)}`;
+      document.querySelector('.graph-layer').src = Number.isInteger(Number(seed))
+        ? `${graphUrl}&seed=${encodeURIComponent(seed)}`
+        : graphUrl;
     }
   </script>
 </body>
