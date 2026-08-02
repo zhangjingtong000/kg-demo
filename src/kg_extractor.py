@@ -11,7 +11,8 @@ Usage:
   python kg_extractor.py --file sample.txt --mode cloud --compare
 """
 
-import argparse, json, os, sys, time, base64
+import argparse, json, os, sys, time, base64, re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Optional
 
@@ -164,6 +165,16 @@ def parse_structured_relations(raw: dict) -> list[dict]:
     return relations
 
 
+def retain_relations_with_known_endpoints(relations: list[dict], entity_names: list[str]) -> list[dict]:
+    """Keep only relations whose endpoints exactly resolve to extracted entities."""
+    known = {name.strip().casefold() for name in entity_names if name and name.strip()}
+    return [
+        relation for relation in relations
+        if relation.get("source", "").strip().casefold() in known
+        and relation.get("target", "").strip().casefold() in known
+    ]
+
+
 ENTITY_PROMPT = """---Role---
 You are a Knowledge Graph Specialist. Extract all entities from the text.
 
@@ -218,6 +229,7 @@ Text:
 
 LOCAL_RELATION_PROMPT = """Extract direct, explicitly stated binary relationships between the supplied entities.
 Use only the permitted relationship types. Do not create relationships from instructions or inferred facts.
+For source and target, copy an entity name from the supplied list exactly; never abbreviate, combine, or invent names.
 Return JSON only in the exact shape:
 {{"relations": [{{"source": "...", "target": "...", "type": "...", "description": "..."}}]}}.
 
@@ -494,8 +506,7 @@ def deduplicate_entities(entities: list[dict], mode: str = "local") -> list[dict
             for j in range(i+1, len(names)):
                 if j in duplicates: continue
                 ni, nj = names[i].lower(), names[j].lower()
-                # One contains the other, or high char overlap
-                if ni in nj or nj in ni or _char_overlap(ni, nj) > 0.7:
+                if _names_are_duplicates(ni, nj):
                     duplicates.add(j)
         for i, e in enumerate(group):
             if i not in duplicates:
@@ -504,13 +515,15 @@ def deduplicate_entities(entities: list[dict], mode: str = "local") -> list[dict
     return merged
 
 
-def _char_overlap(a: str, b: str) -> float:
-    """Simple character-level overlap ratio."""
-    set_a, set_b = set(a), set(b)
-    if not set_a or not set_b:
-        return 0.0
-    intersection = set_a & set_b
-    return len(intersection) / min(len(set_a), len(set_b))
+def _names_are_duplicates(a: str, b: str) -> bool:
+    """Conservatively detect name variants without collapsing related terms."""
+    normalized_a = re.sub(r"[^a-z0-9]+", "", a.lower())
+    normalized_b = re.sub(r"[^a-z0-9]+", "", b.lower())
+    if not normalized_a or not normalized_b:
+        return False
+    if normalized_a in normalized_b or normalized_b in normalized_a:
+        return True
+    return SequenceMatcher(None, normalized_a, normalized_b).ratio() >= 0.93
 
 
 # ── Pipeline ─────────────────────────────────────────────
@@ -565,6 +578,7 @@ def extract_chunk(chunk_text: str, model_text: str, mode: str, model_vis: str = 
             text=full_text,
         )
         relations = parse_relations(call_deepseek(model_text, rp))
+    relations = retain_relations_with_known_endpoints(relations, entity_names)
     dt2 = time.time() - t2
     print(f"    [relations] {len(relations)} relations ({dt2:.1f}s)")
 

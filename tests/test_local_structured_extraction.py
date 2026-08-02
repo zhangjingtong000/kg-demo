@@ -11,6 +11,8 @@ from kg_extractor import (
     decode_local_json_response,
     parse_structured_entities,
     parse_structured_relations,
+    deduplicate_entities,
+    retain_relations_with_known_endpoints,
 )
 
 
@@ -56,6 +58,31 @@ class LocalStructuredExtractionTests(unittest.TestCase):
         self.assertIn(
             '"entities"',
             LOCAL_ENTITY_PROMPT.format(entity_types="Concept", text="Encoder"),
+        )
+
+    def test_deduplication_keeps_distinct_technical_terms(self):
+        entities = [
+            {"name": "Encoder", "type": "Component", "description": ""},
+            {"name": "Decoder", "type": "Component", "description": ""},
+            {"name": "Sequential", "type": "Component", "description": ""},
+            {"name": "Convolutional", "type": "Component", "description": ""},
+        ]
+
+        self.assertEqual(
+            [entity["name"] for entity in deduplicate_entities(entities)],
+            ["Encoder", "Decoder", "Sequential", "Convolutional"],
+        )
+
+    def test_relation_pruner_drops_edges_with_unknown_or_combined_endpoints(self):
+        relations = [
+            {"source": "Encoder", "target": "Attention", "type": "USES", "description": ""},
+            {"source": "Encoder", "target": "Feed Forward", "type": "USES", "description": ""},
+            {"source": "Transformer", "target": "Dataset A, Dataset B", "type": "APPLIES_TO", "description": ""},
+        ]
+
+        self.assertEqual(
+            retain_relations_with_known_endpoints(relations, ["Encoder", "Feed Forward", "Transformer"]),
+            [{"source": "Encoder", "target": "Feed Forward", "type": "USES", "description": ""}],
         )
         self.assertIn(
             '"relations"',
