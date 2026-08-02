@@ -15,6 +15,8 @@ import argparse, json, os, sys, time, base64
 from pathlib import Path
 from typing import Optional
 
+from graph_store import merge_evidence
+
 # ── Config ──────────────────────────────────────────────
 SF_API_KEY = os.environ.get("SF_API_KEY", "")
 SF_BASE   = "https://api.siliconflow.cn/v1"
@@ -301,8 +303,13 @@ def deduplicate_entities(entities: list[dict], mode: str = "local") -> list[dict
             # Keep longer description
             if len(e.get("description", "")) > len(existing.get("description", "")):
                 existing["description"] = e["description"]
+            existing["evidence"] = merge_evidence(
+                existing.get("evidence", []),
+                e.get("evidence", []),
+            )
         else:
             e["name"] = e["name"].strip()
+            e["evidence"] = merge_evidence(e.get("evidence", []))
             seen[key] = e
 
     unique = list(seen.values())

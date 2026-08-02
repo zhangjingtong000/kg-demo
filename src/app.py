@@ -24,7 +24,7 @@ import uvicorn
 
 from pdf_parser import parse_pdf, chunk_document
 from kg_extractor import extract_chunk, deduplicate_entities, MODELS
-from graph_store import GraphStore
+from graph_store import GraphStore, merge_evidence
 
 # ── App Setup ────────────────────────────────────────────
 
@@ -89,6 +89,17 @@ async def upload_pdf(
         for ch in chunked["chunks"]:
             img_path = ch["images"][0]["path"] if ch["images"] else None
             res = extract_chunk(ch["text"], model_text, mode, model_vis, img_path)
+            evidence = {
+                "source_id": gid,
+                "source_name": file.filename,
+                "page": ch["page"],
+                "chunk_idx": ch["chunk_idx"],
+                "text": ch["text"],
+            }
+            for node in res["nodes"]:
+                node["evidence"] = merge_evidence(node.get("evidence", []), [evidence])
+            for edge in res["edges"]:
+                edge["evidence"] = merge_evidence(edge.get("evidence", []), [evidence])
             all_nodes.extend(res["nodes"])
             all_edges.extend(res["edges"])
             total_e_s += res["timing"]["entities_s"]
@@ -96,14 +107,19 @@ async def upload_pdf(
 
         # Step 5: Dedup
         all_nodes = deduplicate_entities(all_nodes, mode)
-        seen_edges = set()
-        deduped_edges = []
+        deduped_edges_by_key = {}
         for e in all_edges:
             key = (e["source"].lower(), e["target"].lower(), e["type"].lower())
-            if key not in seen_edges:
-                seen_edges.add(key)
-                deduped_edges.append(e)
-        all_edges = deduped_edges
+            if key in deduped_edges_by_key:
+                existing = deduped_edges_by_key[key]
+                existing["evidence"] = merge_evidence(
+                    existing.get("evidence", []),
+                    e.get("evidence", []),
+                )
+            else:
+                e["evidence"] = merge_evidence(e.get("evidence", []))
+                deduped_edges_by_key[key] = e
+        all_edges = list(deduped_edges_by_key.values())
 
         # Step 6: Store in Neo4j + NetworkX
         store = GraphStore(backend="networkx")

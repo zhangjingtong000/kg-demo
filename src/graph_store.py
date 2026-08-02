@@ -14,6 +14,24 @@ Usage:
 import json
 from pathlib import Path
 
+
+def merge_evidence(*evidence_lists: list[dict]) -> list[dict]:
+    """Merge chunk references while keeping one record for each source location."""
+    merged = []
+    seen = set()
+    for evidence_list in evidence_lists:
+        for evidence in evidence_list or []:
+            key = (
+                evidence.get("source_id"),
+                evidence.get("page"),
+                evidence.get("chunk_idx"),
+            )
+            if key not in seen:
+                seen.add(key)
+                merged.append(evidence)
+    return merged
+
+
 # ── NetworkX Backend ─────────────────────────────────────
 
 class NetworkXStore:
@@ -34,10 +52,13 @@ class NetworkXStore:
                     name_map[key] = canonical
             else:
                 name_map[key] = canonical
+            node_name = name_map[key]
+            existing = self.g.nodes[node_name] if node_name in self.g else {}
             self.g.add_node(
-                name_map[key],
+                node_name,
                 label=n.get("type", "Entity"),
                 description=n.get("description", ""),
+                evidence=merge_evidence(existing.get("evidence", []), n.get("evidence", [])),
             )
 
         for e in edges:
@@ -47,10 +68,12 @@ class NetworkXStore:
             tgt = name_map.get(tgt_key, e["target"].strip())
             # Only add edge if both endpoints exist (skip dangling edges)
             if src in self.g and tgt in self.g:
+                existing = self.g.get_edge_data(src, tgt, default={})
                 self.g.add_edge(
                     src, tgt,
                     type=e.get("type", "RELATED_TO"),
                     description=e.get("description", ""),
+                    evidence=merge_evidence(existing.get("evidence", []), e.get("evidence", [])),
                 )
 
     def query_nodes(self, label: str = None) -> list[dict]:
