@@ -5,6 +5,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from graph_store import NetworkXStore
 from kg_extractor import deduplicate_entities
+from fastapi.testclient import TestClient
+from app import app, graphs
+
+
+client = TestClient(app)
 
 
 def test_import_data_merges_node_and_edge_evidence():
@@ -40,3 +45,27 @@ def test_entity_deduplication_keeps_every_chunk_reference():
     assert len(entities) == 1
     assert entities[0]["description"] == "Longer"
     assert entities[0]["evidence"] == [{"page": 1}, {"page": 2}]
+
+
+def test_explorer_endpoint_exposes_source_summary_and_80_node_window():
+    graph_id = "explorer-test"
+    graphs[graph_id] = {
+        "id": graph_id,
+        "source": {"id": graph_id, "name": "fixture.pdf", "kind": "pdf"},
+        "nodes": [
+            {"name": f"Entity {index}", "evidence": [{"page": 1}]}
+            for index in range(81)
+        ],
+        "edges": [
+            {"source": "Entity 0", "target": f"Entity {index}"}
+            for index in range(1, 81)
+        ],
+    }
+
+    response = client.get(f"/graph/{graph_id}/explorer?limit=80")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["detail_window"]["visible_count"] == 80
+    assert body["detail_window"]["total_count"] == 81
+    assert body["sources"][0]["source_id"] == graph_id

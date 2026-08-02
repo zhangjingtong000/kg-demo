@@ -12,6 +12,7 @@ Run:
 """
 
 import json, os, uuid, shutil
+from collections import Counter
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -25,6 +26,7 @@ import uvicorn
 from pdf_parser import parse_pdf, chunk_document
 from kg_extractor import extract_chunk, deduplicate_entities, MODELS
 from graph_store import GraphStore, merge_evidence
+from explorer_models import build_detail_window, build_source_summary
 
 # ── App Setup ────────────────────────────────────────────
 
@@ -129,6 +131,7 @@ async def upload_pdf(
         # Save
         result = {
             "id": gid,
+            "source": {"id": gid, "name": file.filename, "kind": "pdf"},
             "nodes": graph_3d["nodes"],
             "edges": graph_3d["edges"],
             "stats": {
@@ -166,6 +169,39 @@ async def get_graph(graph_id: str):
         else:
             raise HTTPException(404, f"Graph '{graph_id}' not found")
     return graphs[graph_id]
+
+
+@app.get("/graph/{graph_id}/explorer")
+async def get_explorer_graph(graph_id: str, limit: int = Query(80, ge=1, le=500)):
+    """Return source metadata and a bounded detailed reading window."""
+    graph = await get_graph(graph_id)
+    degree = Counter(
+        endpoint
+        for edge in graph["edges"]
+        for endpoint in (edge["source"], edge["target"])
+    )
+    nodes = [
+        {
+            "id": node["name"],
+            "name": node["name"],
+            "importance": degree[node["name"]],
+            "bridge_score": 0,
+            "relevance": 0,
+            "evidence": node.get("evidence", []),
+        }
+        for node in graph["nodes"]
+    ]
+    source = graph.get("source", {"id": graph_id, "name": graph_id, "kind": "unknown"})
+    return {
+        "graph_id": graph_id,
+        "sources": [
+            {
+                **build_source_summary(source["id"], source["name"], nodes),
+                "kind": source.get("kind", "unknown"),
+            }
+        ],
+        "detail_window": build_detail_window(nodes, limit),
+    }
 
 
 @app.post("/chat")
