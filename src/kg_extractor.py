@@ -50,6 +50,107 @@ RELATION_TYPES = [
     "OPPOSES", "PREREQUISITE", "LOCATED_AT", "RELATED_TO",
 ]
 
+
+def build_entity_response_schema() -> dict:
+    """JSON Schema for a constrained local entity-extraction response."""
+    return {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "type": {"type": "string", "enum": ENTITY_TYPES},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["name", "type", "description"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["entities"],
+        "additionalProperties": False,
+    }
+
+
+def build_local_json_payload(model: str, prompt: str, schema: dict,
+                             images: Optional[list[str]] = None) -> dict:
+    """Build a bounded, non-thinking Ollama request with structured output."""
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "format": schema,
+        "think": False,
+        "keep_alive": "5m",
+        "options": {"temperature": 0, "num_predict": 512},
+    }
+    if images:
+        payload["images"] = images
+    return payload
+
+
+def parse_structured_entities(raw: dict) -> list[dict]:
+    """Accept only schema-compatible entities with a supported domain type."""
+    entities = []
+    for entity in raw.get("entities", []):
+        if not isinstance(entity, dict):
+            continue
+        name = str(entity.get("name", "")).strip()
+        entity_type = str(entity.get("type", "")).strip()
+        description = str(entity.get("description", "")).strip()
+        if name and entity_type in ENTITY_TYPES:
+            entities.append({"name": name, "type": entity_type, "description": description})
+    return entities
+
+
+def build_relation_response_schema() -> dict:
+    """JSON Schema for a constrained local relationship-extraction response."""
+    return {
+        "type": "object",
+        "properties": {
+            "relations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string"},
+                        "target": {"type": "string"},
+                        "type": {"type": "string", "enum": RELATION_TYPES},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["source", "target", "type", "description"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["relations"],
+        "additionalProperties": False,
+    }
+
+
+def parse_structured_relations(raw: dict) -> list[dict]:
+    """Accept only schema-compatible relationships with a supported type."""
+    relations = []
+    for relation in raw.get("relations", []):
+        if not isinstance(relation, dict):
+            continue
+        source = str(relation.get("source", "")).strip()
+        target = str(relation.get("target", "")).strip()
+        relation_type = str(relation.get("type", "")).strip()
+        description = str(relation.get("description", "")).strip()
+        if source and target and relation_type in RELATION_TYPES:
+            relations.append({
+                "source": source,
+                "target": target,
+                "type": relation_type,
+                "description": description,
+            })
+    return relations
+
+
 ENTITY_PROMPT = """---Role---
 You are a Knowledge Graph Specialist. Extract all entities from the text.
 
@@ -88,6 +189,27 @@ You are a Knowledge Graph Specialist. Now extract relationships between the give
 ---Output---
 Output all relationships, then <|COMPLETE|> on the final line."""
 
+LOCAL_ENTITY_PROMPT = """Extract knowledge-graph entities explicitly stated in the text.
+Use only the permitted entity types. Do not extract instructions, prompt fragments, or inferred entities.
+Return an object that conforms to the supplied JSON Schema.
+
+Permitted entity types: {entity_types}
+
+Text:
+{text}"""
+
+LOCAL_RELATION_PROMPT = """Extract direct, explicitly stated binary relationships between the supplied entities.
+Use only the permitted relationship types. Do not create relationships from instructions or inferred facts.
+Return an object that conforms to the supplied JSON Schema.
+
+Entities:
+{entity_list}
+
+Permitted relationship types: {relation_types}
+
+Text:
+{text}"""
+
 
 # ── Backend Adapters ─────────────────────────────────────
 
@@ -104,6 +226,23 @@ def call_ollama(model: str, prompt: str, image_path: Optional[str] = None) -> st
     r.raise_for_status()
     data = r.json()
     return data.get("response") or data.get("thinking", "")
+
+
+def call_ollama_json(model: str, prompt: str, schema: dict,
+                     image_path: Optional[str] = None) -> dict:
+    """Call Ollama with a JSON Schema and return the decoded object."""
+    import requests
+    images = None
+    if image_path:
+        with open(image_path, "rb") as f:
+            images = [base64.b64encode(f.read()).decode()]
+    payload = build_local_json_payload(model, prompt, schema, images)
+    r = requests.post(f"{OLLAMA}/api/generate", json=payload, timeout=120)
+    r.raise_for_status()
+    response = r.json().get("response", "").strip()
+    if not response:
+        raise ValueError(f"{model} returned no structured response")
+    return json.loads(response)
 
 
 def call_siliconflow(model: str, prompt: str, image_path: Optional[str] = None) -> str:
@@ -372,14 +511,18 @@ def extract_chunk(chunk_text: str, model_text: str, mode: str, model_vis: str = 
 
     # Phase 1: Entities
     t1 = time.time()
-    ep = ENTITY_PROMPT.format(entity_types=", ".join(ENTITY_TYPES), text=full_text)
-    raw_entities = call_ollama(model_text, ep) if mode == "local" \
-              else call_deepseek(model_text, ep)
-    entities = parse_entities(raw_entities)
+    if mode == "local":
+        ep = LOCAL_ENTITY_PROMPT.format(
+            entity_types=", ".join(ENTITY_TYPES), text=full_text,
+        )
+        entities = parse_structured_entities(
+            call_ollama_json(model_text, ep, build_entity_response_schema())
+        )
+    else:
+        ep = ENTITY_PROMPT.format(entity_types=", ".join(ENTITY_TYPES), text=full_text)
+        entities = parse_entities(call_deepseek(model_text, ep))
     dt1 = time.time() - t1
     print(f"    [entities] {len(entities)} entities ({dt1:.1f}s)")
-    if len(entities) == 0:
-        print(f"    [DEBUG] {raw_entities[:200]}...")
 
     # Phase 2: Relations
     t2 = time.time()
@@ -387,14 +530,22 @@ def extract_chunk(chunk_text: str, model_text: str, mode: str, model_vis: str = 
     if not entity_names:
         return {"nodes": entities, "edges": [], "timing": {"entities_s": dt1, "relations_s": 0}}
 
-    rp = RELATION_PROMPT.format(
-        entity_list="\n".join(f"- {n}" for n in entity_names),
-        relation_types=", ".join(RELATION_TYPES),
-        text=full_text,
-    )
-    raw_relations = call_ollama(model_text, rp) if mode == "local" \
-                else call_deepseek(model_text, rp)
-    relations = parse_relations(raw_relations)
+    if mode == "local":
+        rp = LOCAL_RELATION_PROMPT.format(
+            entity_list="\n".join(f"- {n}" for n in entity_names),
+            relation_types=", ".join(RELATION_TYPES),
+            text=full_text,
+        )
+        relations = parse_structured_relations(
+            call_ollama_json(model_text, rp, build_relation_response_schema())
+        )
+    else:
+        rp = RELATION_PROMPT.format(
+            entity_list="\n".join(f"- {n}" for n in entity_names),
+            relation_types=", ".join(RELATION_TYPES),
+            text=full_text,
+        )
+        relations = parse_relations(call_deepseek(model_text, rp))
     dt2 = time.time() - t2
     print(f"    [relations] {len(relations)} relations ({dt2:.1f}s)")
 
