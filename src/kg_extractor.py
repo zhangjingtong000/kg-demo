@@ -7,7 +7,7 @@ Supports:
             DeepSeek via any OpenAI-compatible endpoint
 
 Usage:
-  python kg_extractor.py --text "Squats target quadriceps..." --mode local
+  python kg_extractor.py --text "The encoder uses self-attention..." --mode local
   python kg_extractor.py --file sample.txt --mode cloud --compare
 """
 
@@ -41,13 +41,15 @@ MODELS = {
 
 # ── Prompt Templates ─────────────────────────────────────
 ENTITY_TYPES = [
-    "Exercise", "Muscle", "Equipment", "BodyPart",
-    "Concept", "Metric", "Person", "Organization",
+    "Concept", "Method", "System", "Component", "Process",
+    "Artifact", "Dataset", "Metric", "Tool", "Material",
+    "Person", "Organization", "Location", "Event", "Document",
 ]
 
 RELATION_TYPES = [
-    "TRAINS", "USES", "PART_OF", "SYNERGIST",
-    "OPPOSES", "PREREQUISITE", "LOCATED_AT", "RELATED_TO",
+    "PART_OF", "USES", "PRODUCES", "MEASURES", "EVALUATES",
+    "COMPARES_WITH", "SUPPORTS", "CONTRADICTS", "CAUSES", "ENABLES",
+    "APPLIES_TO", "LOCATED_AT", "CREATED_BY", "CITES", "RELATED_TO",
 ]
 
 
@@ -75,21 +77,32 @@ def build_entity_response_schema() -> dict:
     }
 
 
-def build_local_json_payload(model: str, prompt: str, schema: dict,
+def build_local_json_payload(model: str, prompt: str, schema: Optional[dict],
                              images: Optional[list[str]] = None) -> dict:
     """Build a bounded, non-thinking Ollama request with structured output."""
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "format": schema,
         "think": False,
         "keep_alive": "5m",
         "options": {"temperature": 0, "num_predict": 512},
     }
+    if schema is not None:
+        payload["format"] = schema
     if images:
         payload["images"] = images
     return payload
+
+
+def decode_local_json_response(raw: str) -> dict:
+    """Decode a local JSON response, accepting a Markdown JSON fence if present."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        if text.endswith("```"):
+            text = text[:-3].strip()
+    return json.loads(text)
 
 
 def parse_structured_entities(raw: dict) -> list[dict]:
@@ -189,9 +202,14 @@ You are a Knowledge Graph Specialist. Now extract relationships between the give
 ---Output---
 Output all relationships, then <|COMPLETE|> on the final line."""
 
-LOCAL_ENTITY_PROMPT = """Extract knowledge-graph entities explicitly stated in the text.
-Use only the permitted entity types. Do not extract instructions, prompt fragments, or inferred entities.
-Return an object that conforms to the supplied JSON Schema.
+LOCAL_ENTITY_PROMPT = """Extract every explicitly named knowledge-graph entity in the text.
+Include named technical terms, components, methods, systems, datasets, metrics, people, organizations,
+places, events, documents, and other concrete concepts that are stated in the text. For example, an
+algorithm is a Method, a module or layer is a Component, and a named model or framework is a System.
+Use only the permitted entity types. Do not extract instructions, prompt fragments, or facts not stated.
+If the text explicitly names one or more entities, do not return an empty entity array.
+Return JSON only in the exact shape:
+{{"entities": [{{"name": "...", "type": "...", "description": "..."}}]}}.
 
 Permitted entity types: {entity_types}
 
@@ -200,7 +218,8 @@ Text:
 
 LOCAL_RELATION_PROMPT = """Extract direct, explicitly stated binary relationships between the supplied entities.
 Use only the permitted relationship types. Do not create relationships from instructions or inferred facts.
-Return an object that conforms to the supplied JSON Schema.
+Return JSON only in the exact shape:
+{{"relations": [{{"source": "...", "target": "...", "type": "...", "description": "..."}}]}}.
 
 Entities:
 {entity_list}
@@ -228,7 +247,7 @@ def call_ollama(model: str, prompt: str, image_path: Optional[str] = None) -> st
     return data.get("response") or data.get("thinking", "")
 
 
-def call_ollama_json(model: str, prompt: str, schema: dict,
+def call_ollama_json(model: str, prompt: str, schema: Optional[dict] = None,
                      image_path: Optional[str] = None) -> dict:
     """Call Ollama with a JSON Schema and return the decoded object."""
     import requests
@@ -242,7 +261,7 @@ def call_ollama_json(model: str, prompt: str, schema: dict,
     response = r.json().get("response", "").strip()
     if not response:
         raise ValueError(f"{model} returned no structured response")
-    return json.loads(response)
+    return decode_local_json_response(response)
 
 
 def call_siliconflow(model: str, prompt: str, image_path: Optional[str] = None) -> str:
@@ -428,7 +447,7 @@ def deduplicate_entities(entities: list[dict], mode: str = "local") -> list[dict
     Merge entities with identical or similar names.
     - Case-insensitive exact name → merge (keep longer description)
     - Same type + >70% char overlap → merge
-    - Cross-type: keep separate (e.g. "Bench Press" exercise vs "Bench" equipment)
+    - Cross-type: keep separate (e.g. "Transformer" system vs "Transformer" organization)
     """
     # Phase 1: Case-insensitive exact name dedup
     seen = {}
@@ -516,7 +535,7 @@ def extract_chunk(chunk_text: str, model_text: str, mode: str, model_vis: str = 
             entity_types=", ".join(ENTITY_TYPES), text=full_text,
         )
         entities = parse_structured_entities(
-            call_ollama_json(model_text, ep, build_entity_response_schema())
+            call_ollama_json(model_text, ep)
         )
     else:
         ep = ENTITY_PROMPT.format(entity_types=", ".join(ENTITY_TYPES), text=full_text)
@@ -537,7 +556,7 @@ def extract_chunk(chunk_text: str, model_text: str, mode: str, model_vis: str = 
             text=full_text,
         )
         relations = parse_structured_relations(
-            call_ollama_json(model_text, rp, build_relation_response_schema())
+            call_ollama_json(model_text, rp)
         )
     else:
         rp = RELATION_PROMPT.format(

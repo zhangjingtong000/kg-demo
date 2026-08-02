@@ -1,15 +1,29 @@
 import unittest
 
 from kg_extractor import (
+    ENTITY_TYPES,
+    LOCAL_ENTITY_PROMPT,
+    LOCAL_RELATION_PROMPT,
+    RELATION_TYPES,
     build_entity_response_schema,
     build_relation_response_schema,
     build_local_json_payload,
+    decode_local_json_response,
     parse_structured_entities,
     parse_structured_relations,
 )
 
 
 class LocalStructuredExtractionTests(unittest.TestCase):
+    def test_default_ontology_is_domain_neutral(self):
+        self.assertIn("Concept", ENTITY_TYPES)
+        self.assertIn("Method", ENTITY_TYPES)
+        self.assertIn("Document", ENTITY_TYPES)
+        self.assertNotIn("Exercise", ENTITY_TYPES)
+        self.assertNotIn("Muscle", ENTITY_TYPES)
+        self.assertIn("CITES", RELATION_TYPES)
+        self.assertIn("EVALUATES", RELATION_TYPES)
+
     def test_local_entity_payload_requires_json_schema_and_bounded_output(self):
         payload = build_local_json_payload(
             model="qwen3.5:9b",
@@ -22,6 +36,33 @@ class LocalStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(payload["options"]["temperature"], 0)
         self.assertLessEqual(payload["options"]["num_predict"], 512)
         self.assertFalse(payload["think"])
+
+    def test_local_payload_can_omit_schema_for_compatible_json_mode(self):
+        payload = build_local_json_payload(
+            model="qwen3.5:9b", prompt="Return JSON.", schema=None,
+        )
+
+        self.assertNotIn("format", payload)
+
+    def test_decoder_accepts_json_wrapped_in_a_markdown_fence(self):
+        raw = '```json\n{"entities": [{"name": "Encoder"}]}\n```'
+
+        self.assertEqual(
+            decode_local_json_response(raw),
+            {"entities": [{"name": "Encoder"}]},
+        )
+
+    def test_local_prompts_format_without_interpreting_json_examples(self):
+        self.assertIn(
+            '"entities"',
+            LOCAL_ENTITY_PROMPT.format(entity_types="Concept", text="Encoder"),
+        )
+        self.assertIn(
+            '"relations"',
+            LOCAL_RELATION_PROMPT.format(
+                entity_list="- Encoder", relation_types="PART_OF", text="Encoder stack",
+            ),
+        )
 
     def test_structured_entities_keep_only_valid_domain_types(self):
         raw = {
