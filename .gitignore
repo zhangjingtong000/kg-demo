@@ -13,6 +13,7 @@ venv/
 /output/
 /.playwright-cli/
 /.superpowers/
+/.worktrees/
 
 # Standalone visual reference project; maintained in its own Git repository.
 /isgalaxias/
