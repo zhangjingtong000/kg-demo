@@ -257,13 +257,15 @@ scene.add(nodeGroup); scene.add(labelGroup);
 // --- Connections: pre-built, updated in-place (no per-frame rebuild) ---
 const connectionsGroup = new THREE.Group();
 const edgeObjects = []; // { main, core, from, to }
-const EDGE_MAIN_OPACITY = 0.68;
-const EDGE_CORE_OPACITY = 0.42;
+// A thin readable filament plus a restrained halo keeps relationships present
+// without turning the graph into a brighter object than its glass nodes.
+const EDGE_MAIN_OPACITY = 0.54;
+const EDGE_CORE_OPACITY = 0.15;
 
 function createEdgeMeshes(p1, p2, c1, c2) {
-  const mg = createGlowBeam(p1,p2,c1,c2,0.022,40);
+  const mg = createGlowBeam(p1,p2,c1,c2,0.016,40);
   const main = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:EDGE_MAIN_OPACITY, blending:THREE.AdditiveBlending, depthWrite:false }));
-  const cg = createGlowBeam(p1,p2,c1,c2,0.032,30);
+  const cg = createGlowBeam(p1,p2,c1,c2,0.034,30);
   const core = new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:EDGE_CORE_OPACITY, blending:THREE.AdditiveBlending, depthWrite:false }));
   return { main, core };
 }
@@ -307,8 +309,8 @@ function refreshEdgePositions() {
   edgeObjects.forEach(eo => {
     const p1 = nodeMeshes[eo.from].mesh.position, p2 = nodeMeshes[eo.to].mesh.position;
     const c1 = new THREE.Color(graphData[eo.from].color), c2 = new THREE.Color(graphData[eo.to].color);
-    updateEdgeGeometry(eo.main, p1, p2, c1, c2, 0.022, 40);
-    updateEdgeGeometry(eo.core, p1, p2, c1, c2, 0.032, 30);
+    updateEdgeGeometry(eo.main, p1, p2, c1, c2, 0.016, 40);
+    updateEdgeGeometry(eo.core, p1, p2, c1, c2, 0.034, 30);
   });
 }
 
