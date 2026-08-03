@@ -12,6 +12,7 @@ Usage:
 """
 
 import json
+from math import cos, pi, sin, sqrt
 from pathlib import Path
 
 
@@ -30,6 +31,60 @@ def merge_evidence(*evidence_lists: list[dict]) -> list[dict]:
                 seen.add(key)
                 merged.append(evidence)
     return merged
+
+
+def separate_structural_twins(graph, positions: dict, minimum_distance: float = 0.32) -> None:
+    """Give indistinguishable connected nodes a deterministic, symmetric offset.
+
+    A force-directed layout correctly sees nodes with the same predecessor and
+    successor sets as equivalent.  In a knowledge graph that is mathematically
+    valid but visually unhelpful: their rendered spheres can occupy the same
+    point.  Only near-coincident non-isolated twins are separated, so ordinary
+    layouts retain their natural geometry.
+    """
+    signatures: dict[tuple[tuple[str, ...], tuple[str, ...]], list[str]] = {}
+    for node in graph.nodes:
+        incoming = tuple(sorted(graph.predecessors(node)))
+        outgoing = tuple(sorted(graph.successors(node)))
+        if incoming or outgoing:
+            signatures.setdefault((incoming, outgoing), []).append(node)
+
+    for twins in signatures.values():
+        if len(twins) < 2:
+            continue
+        twins.sort()
+        points = [positions[node] for node in twins]
+        closest = min(
+            sqrt(sum((points[left][axis] - points[right][axis]) ** 2 for axis in range(3)))
+            for left in range(len(points))
+            for right in range(left + 1, len(points))
+        )
+        if closest >= minimum_distance:
+            continue
+
+        center = [sum(point[axis] for point in points) / len(points) for axis in range(3)]
+        # A repeatable tangent plane around the cluster center.  The fallback
+        # covers a node group whose center happens to lie on the Z axis.
+        radial_length = sqrt(sum(value * value for value in center))
+        radial = [value / radial_length for value in center] if radial_length else [1.0, 0.0, 0.0]
+        tangent = [-radial[1], radial[0], 0.0]
+        tangent_length = sqrt(sum(value * value for value in tangent))
+        if tangent_length < 1e-9:
+            tangent = [0.0, -radial[2], radial[1]]
+            tangent_length = sqrt(sum(value * value for value in tangent))
+        tangent = [value / tangent_length for value in tangent]
+        bitangent = [
+            radial[1] * tangent[2] - radial[2] * tangent[1],
+            radial[2] * tangent[0] - radial[0] * tangent[2],
+            radial[0] * tangent[1] - radial[1] * tangent[0],
+        ]
+        radius = minimum_distance / (2 * sin(pi / len(twins)))
+        for index, node in enumerate(twins):
+            angle = (2 * pi * index / len(twins)) + (pi / 2)
+            positions[node] = [
+                center[axis] + radius * (cos(angle) * tangent[axis] + sin(angle) * bitangent[axis])
+                for axis in range(3)
+            ]
 
 
 # ── NetworkX Backend ─────────────────────────────────────
@@ -228,6 +283,7 @@ class GraphStore:
             for e in edges:
                 g.add_edge(e["source"], e["target"])
             pos = nx.spring_layout(g, dim=3, seed=42)
+            separate_structural_twins(g, pos)
             for n in nodes:
                 p = pos.get(n["name"], [0, 0, 0])
                 n["x"], n["y"], n["z"] = float(p[0]), float(p[1]), float(p[2])

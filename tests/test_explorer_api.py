@@ -3,13 +3,33 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from graph_store import NetworkXStore
+from graph_store import NetworkXStore, separate_structural_twins
 from kg_extractor import deduplicate_entities
 from fastapi.testclient import TestClient
 from app import app, graphs
 
 
 client = TestClient(app)
+
+
+def test_structural_twins_get_a_symmetric_minimum_separation():
+    import networkx as nx
+
+    graph = nx.DiGraph()
+    graph.add_edges_from([
+        ("Source", "Twin A"), ("Source", "Twin B"),
+        ("Twin A", "Target"), ("Twin B", "Target"),
+    ])
+    positions = {node: [0.0, 0.0, 0.0] for node in graph.nodes}
+
+    separate_structural_twins(graph, positions)
+
+    assert positions["Twin A"] != positions["Twin B"]
+    distance_squared = sum(
+        (positions["Twin A"][axis] - positions["Twin B"][axis]) ** 2
+        for axis in range(3)
+    )
+    assert distance_squared >= 0.32 ** 2
 
 
 def test_import_data_merges_node_and_edge_evidence():

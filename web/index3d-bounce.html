@@ -117,7 +117,50 @@ const showcaseEdges = [
 // the data set; meshes, labels, focus relayout and drag behaviour below remain
 // the production implementation.
 const graphSelection = selectGraphProfile(location.search);
-const selectedGraph = createGraphProfile(graphSelection.profile, graphSelection.seed);
+const graphParams = new URLSearchParams(location.search);
+const REAL_GRAPH_COLORS = { Concept:'#c9a0dc', Method:'#7db8d4', System:'#e8c170', Component:'#88c9a0', Process:'#d4a0b0', Dataset:'#a0c0c8', Metric:'#e8a870', Person:'#c8a8b8', Organization:'#b8d0c0', Document:'#d8c090' };
+const FALLBACK_GRAPH_COLORS = ['#e8c170', '#7db8d4', '#c9a0dc', '#88c9a0', '#e8a870', '#d4a0b0'];
+
+function colorForType(type) {
+  if (REAL_GRAPH_COLORS[type]) return REAL_GRAPH_COLORS[type];
+  let hash = 0;
+  for (const char of String(type ?? 'Entity')) hash = ((hash << 5) - hash) + char.charCodeAt(0);
+  return FALLBACK_GRAPH_COLORS[Math.abs(hash) % FALLBACK_GRAPH_COLORS.length];
+}
+
+async function loadRuntimeGraph() {
+  const graphUrl = graphParams.get('graph');
+  if (!graphUrl) return createGraphProfile(graphSelection.profile, graphSelection.seed);
+  try {
+    const response = await fetch(graphUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const source = await response.json();
+    const degree = new Map();
+    for (const edge of source.edges ?? []) {
+      degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+      degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+    }
+    const indexByName = new Map((source.nodes ?? []).map((node, index) => [node.name, index]));
+    const nodes = (source.nodes ?? []).map((node, index) => ({
+      pos: [Number(node.x ?? ((index % 6) - 3) * 2) * 13, Number(node.y ?? (index % 4) - 2) * 10, Number(node.z ?? 0) * 13],
+      r: Math.min(0.82, 0.42 + Math.sqrt(degree.get(node.name) ?? 0) * 0.10),
+      color: colorForType(node.label ?? node.type),
+      label: node.name,
+      meta: node,
+    }));
+    const edges = (source.edges ?? []).flatMap((edge) => {
+      const from = indexByName.get(edge.source), to = indexByName.get(edge.target);
+      return Number.isInteger(from) && Number.isInteger(to) && from !== to ? [[from, to]] : [];
+    });
+    if (!nodes.length) throw new Error('Graph has no renderable nodes');
+    return { profile: 'runtime', nodes, edges };
+  } catch (error) {
+    console.warn('Unable to load runtime graph; showing the showcase graph instead.', error);
+    return createGraphProfile(graphSelection.profile, graphSelection.seed);
+  }
+}
+
+const selectedGraph = await loadRuntimeGraph();
 const graphData = selectedGraph.nodes;
 const edges = selectedGraph.edges;
 const layoutRandom = graphSelection.benchmark

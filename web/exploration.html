@@ -30,6 +30,11 @@
         ? `${graphUrl}&seed=${encodeURIComponent(seed)}`
         : graphUrl;
     }
+    const runtimeGraph = params.get('graph');
+    if (runtimeGraph) {
+      const graphUrl = `index3d-bounce.html?transparentBackground=1&graph=${encodeURIComponent(runtimeGraph)}`;
+      document.querySelector('.graph-layer').src = graphUrl;
+    }
   </script>
 </body>
 </html>
