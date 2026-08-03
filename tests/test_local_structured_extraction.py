@@ -95,6 +95,7 @@ class LocalStructuredExtractionTests(unittest.TestCase):
         raw = {
             "entities": [
                 {"name": "Encoder", "type": "Concept", "description": "The encoder stack."},
+                {"name": "Figure 2", "type": "Document", "description": "A visual reference."},
                 {"name": "Prompt rule", "type": "EntityName", "description": "Not a domain entity."},
             ]
         }

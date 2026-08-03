@@ -115,9 +115,14 @@ def parse_structured_entities(raw: dict) -> list[dict]:
         name = str(entity.get("name", "")).strip()
         entity_type = str(entity.get("type", "")).strip()
         description = str(entity.get("description", "")).strip()
-        if name and entity_type in ENTITY_TYPES:
+        if name and entity_type in ENTITY_TYPES and not _is_structural_reference(name):
             entities.append({"name": name, "type": entity_type, "description": description})
     return entities
+
+
+def _is_structural_reference(name: str) -> bool:
+    """Exclude document-internal labels; their page/chunk remains evidence metadata."""
+    return bool(re.fullmatch(r"(?:figure|fig\.?|table|equation|eq\.?)\s*\d+[a-z]?", name.strip(), re.IGNORECASE))
 
 
 def build_relation_response_schema() -> dict:
@@ -218,6 +223,7 @@ Include named technical terms, components, methods, systems, datasets, metrics, 
 places, events, documents, and other concrete concepts that are stated in the text. For example, an
 algorithm is a Method, a module or layer is a Component, and a named model or framework is a System.
 Use only the permitted entity types. Do not extract instructions, prompt fragments, or facts not stated.
+Do not extract internal labels such as Figure 2, Table 3, or Equation 1; retain those only as evidence context.
 If the text explicitly names one or more entities, do not return an empty entity array.
 Return JSON only in the exact shape:
 {{"entities": [{{"name": "...", "type": "...", "description": "..."}}]}}.
