@@ -361,23 +361,38 @@ let tgtEdgeTint = edges.map(() => new THREE.Color('#ffffff'));
 const DIFF_LERP = 2.5;
 
 function edgeDepthStyle(distance) {
-  // The former scale reached 0.04 at four hops, which becomes imperceptible
-  // once a luminous starfield sits behind the graph. Keep a readable floor and
-  // shift farther relations into a cool, quieter tone instead.
-  if (distance === 0) return { alpha: 1.00, tint: '#fffdf5' };
-  if (distance === 1) return { alpha: 0.76, tint: '#e5efff' };
-  if (distance === 2) return { alpha: 0.54, tint: '#bed1ff' };
-  if (distance === 3) return { alpha: 0.38, tint: '#9eb7e8' };
-  return { alpha: 0.28, tint: '#839bd0' };
+  // An edge inherits the layer nearest to the focused node. This makes the
+  // expansion readable at a glance: direct relations → first expansion →
+  // second expansion → contextual background, without losing the far layers
+  // against the luminous starfield.
+  if (distance === 0) return { alpha: 1.00, tint: '#ffd166' }; // focus → 1 hop
+  if (distance === 1) return { alpha: 0.78, tint: '#39c7ff' }; // 1 → 2 hops
+  if (distance === 2) return { alpha: 0.58, tint: '#a878ff' }; // 2 → 3 hops
+  if (distance === 3) return { alpha: 0.42, tint: '#6489df' }; // 3 → 4 hops
+  return { alpha: 0.32, tint: '#5472b4' };                     // context
+}
+
+function setFocusedEdgeColorMode(active) {
+  edgeObjects.forEach((eo) => {
+    for (const material of [eo.main.material, eo.core.material]) {
+      const nextVertexColors = !active;
+      if (material.vertexColors !== nextVertexColors) {
+        material.vertexColors = nextVertexColors;
+        material.needsUpdate = true;
+      }
+    }
+  });
 }
 
 function setFocusDiffusion(fi) {
   if (fi === null) {
+    setFocusedEdgeColorMode(false);
     tgtGlowAlpha.forEach((_,i) => tgtGlowAlpha[i] = 1.0);
     tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
     tgtEdgeTint.forEach((tint) => tint.set('#ffffff'));
     return;
   }
+  setFocusedEdgeColorMode(true);
   const dist = bfs(fi);
   for (let i=0;i<graphData.length;i++) {
     const d = dist.has(i) ? dist.get(i) : 999;
