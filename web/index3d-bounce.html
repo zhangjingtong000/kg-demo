@@ -257,12 +257,14 @@ scene.add(nodeGroup); scene.add(labelGroup);
 // --- Connections: pre-built, updated in-place (no per-frame rebuild) ---
 const connectionsGroup = new THREE.Group();
 const edgeObjects = []; // { main, core, from, to }
+const EDGE_MAIN_OPACITY = 0.68;
+const EDGE_CORE_OPACITY = 0.42;
 
 function createEdgeMeshes(p1, p2, c1, c2) {
   const mg = createGlowBeam(p1,p2,c1,c2,0.022,40);
-  const main = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:0.5, blending:THREE.AdditiveBlending, depthWrite:false }));
+  const main = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:EDGE_MAIN_OPACITY, blending:THREE.AdditiveBlending, depthWrite:false }));
   const cg = createGlowBeam(p1,p2,c1,c2,0.032,30);
-  const core = new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:0.3, blending:THREE.AdditiveBlending, depthWrite:false }));
+  const core = new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ vertexColors:true, transparent:true, opacity:EDGE_CORE_OPACITY, blending:THREE.AdditiveBlending, depthWrite:false }));
   return { main, core };
 }
 
@@ -313,8 +315,8 @@ function refreshEdgePositions() {
 function setEdgeHighlight(hoveredIdx) {
   edgeObjects.forEach(eo => {
     const on = hoveredIdx===null || eo.from===hoveredIdx || eo.to===hoveredIdx;
-    eo.main.material.opacity = on ? 0.5 : 0.06;
-    eo.core.material.opacity = on ? 0.3 : 0.03;
+    eo.main.material.opacity = on ? EDGE_MAIN_OPACITY : 0.08;
+    eo.core.material.opacity = on ? EDGE_CORE_OPACITY : 0.05;
   });
 }
 
@@ -354,12 +356,26 @@ let curGlowAlpha = graphData.map(() => 1.0);
 let tgtGlowAlpha = graphData.map(() => 1.0);
 let curEdgeAlpha = edges.map(() => 1.0);
 let tgtEdgeAlpha = edges.map(() => 1.0);
+let curEdgeTint = edges.map(() => new THREE.Color('#ffffff'));
+let tgtEdgeTint = edges.map(() => new THREE.Color('#ffffff'));
 const DIFF_LERP = 2.5;
+
+function edgeDepthStyle(distance) {
+  // The former scale reached 0.04 at four hops, which becomes imperceptible
+  // once a luminous starfield sits behind the graph. Keep a readable floor and
+  // shift farther relations into a cool, quieter tone instead.
+  if (distance === 0) return { alpha: 1.00, tint: '#fffdf5' };
+  if (distance === 1) return { alpha: 0.76, tint: '#e5efff' };
+  if (distance === 2) return { alpha: 0.54, tint: '#bed1ff' };
+  if (distance === 3) return { alpha: 0.38, tint: '#9eb7e8' };
+  return { alpha: 0.28, tint: '#839bd0' };
+}
 
 function setFocusDiffusion(fi) {
   if (fi === null) {
     tgtGlowAlpha.forEach((_,i) => tgtGlowAlpha[i] = 1.0);
     tgtEdgeAlpha.forEach((_,i) => tgtEdgeAlpha[i] = 1.0);
+    tgtEdgeTint.forEach((tint) => tint.set('#ffffff'));
     return;
   }
   const dist = bfs(fi);
@@ -370,7 +386,9 @@ function setFocusDiffusion(fi) {
   edges.forEach(([f,t],k) => {
     const df = dist.has(f)?dist.get(f):999, dt = dist.has(t)?dist.get(t):999;
     const d = Math.min(df, dt);
-    tgtEdgeAlpha[k] = d===0?1.0 : d===1?0.55 : d===2?0.25 : d===3?0.1 : 0.04;
+    const style = edgeDepthStyle(d);
+    tgtEdgeAlpha[k] = style.alpha;
+    tgtEdgeTint[k].set(style.tint);
   });
 }
 let dirty = false;
@@ -623,7 +641,13 @@ function animate() {
     for (let k=0;k<edges.length;k++) {
       curEdgeAlpha[k] += (tgtEdgeAlpha[k]-curEdgeAlpha[k]) * DIFF_LERP * dt;
       const eo = edgeObjects[k];
-      if (eo) { eo.main.material.opacity = 0.5 * curEdgeAlpha[k]; eo.core.material.opacity = 0.3 * curEdgeAlpha[k]; }
+      if (eo) {
+        curEdgeTint[k].lerp(tgtEdgeTint[k], DIFF_LERP * dt);
+        eo.main.material.opacity = EDGE_MAIN_OPACITY * curEdgeAlpha[k];
+        eo.core.material.opacity = EDGE_CORE_OPACITY * curEdgeAlpha[k];
+        eo.main.material.color.copy(curEdgeTint[k]);
+        eo.core.material.color.copy(curEdgeTint[k]);
+      }
     }
   }
 
