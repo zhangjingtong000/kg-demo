@@ -90,7 +90,10 @@ async def upload_pdf(
 
         for ch in chunked["chunks"]:
             img_path = ch["images"][0]["path"] if ch["images"] else None
-            res = extract_chunk(ch["text"], model_text, mode, model_vis, img_path)
+            res = extract_chunk(
+                ch["text"], model_text, mode, model_vis, img_path,
+                content_kind=ch.get("kind", "text"),
+            )
             evidence = {
                 "source_id": gid,
                 "source_name": file.filename,

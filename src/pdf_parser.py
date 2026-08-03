@@ -13,6 +13,17 @@ from typing import Optional
 
 # ── PDF Parsing ──────────────────────────────────────────
 
+def is_usable_table_data(data: list[list[object]]) -> bool:
+    """Reject obvious layout artifacts emitted by PDF table detection."""
+    if len(data) < 2:
+        return False
+    width = max((len(row) for row in data), default=0)
+    if width < 2 or width > 16:
+        return False
+    cells = [str(cell).strip() for row in data for cell in row if cell is not None]
+    return sum(bool(cell) for cell in cells) >= 4
+
+
 def parse_pdf(pdf_path: str, output_dir: Optional[str] = None) -> dict:
     """
     Extract text and images from a PDF file.
@@ -66,11 +77,14 @@ def parse_pdf(pdf_path: str, output_dir: Optional[str] = None) -> dict:
             tabs = page.find_tables()
             if tabs and tabs.tables:
                 for ti, tab in enumerate(tabs.tables):
+                    data = tab.extract()
+                    if not is_usable_table_data(data):
+                        continue
                     tables_out.append({
                         "page": pi + 1,
                         "table_idx": ti + 1,
-                        "rows": len(tab.row_count) if hasattr(tab, 'row_count') else len(tab.extract()),
-                        "data": tab.extract(),
+                        "rows": tab.row_count if hasattr(tab, 'row_count') else len(tab.extract()),
+                        "data": data,
                     })
         doc2.close()
         out["tables"] = tables_out
@@ -136,18 +150,44 @@ def chunk_text(text: str, max_chars: int = 500, overlap_ratio: float = 0.3) -> l
     return chunks
 
 
+def table_to_text(table: dict) -> str:
+    """Serialize a detected PDF table into a compact, model-readable text block."""
+    lines = [f"Table {table['table_idx']}"]
+    for row in table.get("data", []):
+        cells = [" ".join(str(cell or "").split()) for cell in row]
+        lines.append(" | ".join(cells))
+    return "\n".join(lines)
+
+
 def chunk_document(parsed: dict, max_chars: int = 500, overlap_ratio: float = 0.3) -> dict:
     """Apply chunking to all pages in a parsed document."""
     all_chunks = []
+    tables_by_page = {}
+    for table in parsed.get("tables", []):
+        tables_by_page.setdefault(table["page"], []).append(table)
+
     for page in parsed["pages"]:
         page_chunks = chunk_text(page["text"], max_chars, overlap_ratio)
         for ci, chunk in enumerate(page_chunks):
             all_chunks.append({
                 "page": page["num"],
                 "chunk_idx": ci + 1,
+                "kind": "text",
                 "char_count": len(chunk),
                 "text": chunk,
                 "images": page["images"] if ci == 0 else [],  # images only on first chunk of page
+            })
+
+        for table in tables_by_page.get(page["num"], []):
+            table_text = table_to_text(table)
+            all_chunks.append({
+                "page": page["num"],
+                "chunk_idx": len(page_chunks) + table["table_idx"],
+                "kind": "table",
+                "table_idx": table["table_idx"],
+                "char_count": len(table_text),
+                "text": table_text,
+                "images": [],
             })
 
     return {

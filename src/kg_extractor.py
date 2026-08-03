@@ -180,6 +180,20 @@ def retain_relations_with_known_endpoints(relations: list[dict], entity_names: l
     ]
 
 
+def retain_semantic_table_entities(entities: list[dict]) -> list[dict]:
+    """Remove table-only row markers that cannot be explored as knowledge entities."""
+    generic_markers = {"base", "big", "small", "large", "default", "baseline"}
+    retained = []
+    for entity in entities:
+        name = entity.get("name", "").strip()
+        if name.casefold() in generic_markers:
+            continue
+        if re.fullmatch(r"\([a-z0-9]{1,3}\)", name, re.IGNORECASE):
+            continue
+        retained.append(entity)
+    return retained
+
+
 ENTITY_PROMPT = """---Role---
 You are a Knowledge Graph Specialist. Extract all entities from the text.
 
@@ -233,6 +247,21 @@ Permitted entity types: {entity_types}
 Text:
 {text}"""
 
+LOCAL_TABLE_ENTITY_PROMPT = """This is tabular evidence extracted from a document.
+Extract explicitly named systems, methods, datasets, metrics, people, organizations, and concrete concepts
+from row and column labels. Treat numeric values as evidence in an entity description, never as standalone
+entities. Exclude configuration markers, row IDs, and generic labels such as base, big, (A), or (B).
+Extract at most five high-salience entities. When the table contains semantic named rows or headers,
+do not return an empty entity array.
+Use only the permitted entity types. Do not extract table labels such as Table 1.
+Return JSON only in the exact shape:
+{{"entities": [{{"name": "...", "type": "...", "description": "..."}}]}}.
+
+Permitted entity types: {entity_types}
+
+Table:
+{text}"""
+
 LOCAL_RELATION_PROMPT = """Extract direct, explicitly stated binary relationships between the supplied entities.
 Use only the permitted relationship types. Do not create relationships from instructions or inferred facts.
 For source and target, copy an entity name from the supplied list exactly; never abbreviate, combine, or invent names.
@@ -246,6 +275,12 @@ Permitted relationship types: {relation_types}
 
 Text:
 {text}"""
+
+
+def build_local_entity_prompt(text: str, content_kind: str = "text") -> str:
+    """Select an extraction instruction tailored to prose or a detected table."""
+    template = LOCAL_TABLE_ENTITY_PROMPT if content_kind == "table" else LOCAL_ENTITY_PROMPT
+    return template.format(entity_types=", ".join(ENTITY_TYPES), text=text)
 
 
 # ── Backend Adapters ─────────────────────────────────────
@@ -535,7 +570,7 @@ def _names_are_duplicates(a: str, b: str) -> bool:
 # ── Pipeline ─────────────────────────────────────────────
 
 def extract_chunk(chunk_text: str, model_text: str, mode: str, model_vis: str = None,
-                  image_path: Optional[str] = None) -> dict:
+                  image_path: Optional[str] = None, content_kind: str = "text") -> dict:
     """Extract entities + relations from a single text chunk."""
     # Image context
     full_text = chunk_text
@@ -550,15 +585,15 @@ def extract_chunk(chunk_text: str, model_text: str, mode: str, model_vis: str = 
     # Phase 1: Entities
     t1 = time.time()
     if mode == "local":
-        ep = LOCAL_ENTITY_PROMPT.format(
-            entity_types=", ".join(ENTITY_TYPES), text=full_text,
-        )
+        ep = build_local_entity_prompt(full_text, content_kind)
         entities = parse_structured_entities(
             call_ollama_json(model_text, ep)
         )
     else:
         ep = ENTITY_PROMPT.format(entity_types=", ".join(ENTITY_TYPES), text=full_text)
         entities = parse_entities(call_deepseek(model_text, ep))
+    if content_kind == "table":
+        entities = retain_semantic_table_entities(entities)
     dt1 = time.time() - t1
     print(f"    [entities] {len(entities)} entities ({dt1:.1f}s)")
 
@@ -661,7 +696,10 @@ def extract_from_pdf(pdf_path: str, mode: str = "cloud", max_chunk_chars: int = 
         print(f"  [chunk {ch['chunk_idx']}/{chunked['total_chunks']}] page {ch['page']}, {ch['char_count']} chars")
         # Use first image on the page for vision context (if any)
         img_path = ch["images"][0]["path"] if ch["images"] else None
-        res = extract_chunk(ch["text"], MODELS[mode]["text"], mode, MODELS[mode]["vision"], img_path)
+        res = extract_chunk(
+            ch["text"], MODELS[mode]["text"], mode, MODELS[mode]["vision"], img_path,
+            content_kind=ch.get("kind", "text"),
+        )
         all_nodes.extend(res["nodes"])
         all_edges.extend(res["edges"])
         total_e_s += res["timing"]["entities_s"]

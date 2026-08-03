@@ -4,6 +4,7 @@ from kg_extractor import (
     ENTITY_TYPES,
     LOCAL_ENTITY_PROMPT,
     LOCAL_RELATION_PROMPT,
+    build_local_entity_prompt,
     RELATION_TYPES,
     build_entity_response_schema,
     build_relation_response_schema,
@@ -13,6 +14,7 @@ from kg_extractor import (
     parse_structured_relations,
     deduplicate_entities,
     retain_relations_with_known_endpoints,
+    retain_semantic_table_entities,
 )
 
 
@@ -60,6 +62,17 @@ class LocalStructuredExtractionTests(unittest.TestCase):
             LOCAL_ENTITY_PROMPT.format(entity_types="Concept", text="Encoder"),
         )
 
+    def test_table_chunks_receive_a_table_specific_entity_prompt(self):
+        prompt = build_local_entity_prompt(
+            text="Model | BLEU\nTransformer | 28.4",
+            content_kind="table",
+        )
+
+        self.assertIn("tabular", prompt.lower())
+        self.assertIn("metric", prompt.lower())
+        self.assertIn("at most five", prompt.lower())
+        self.assertIn("configuration markers", prompt.lower())
+
     def test_deduplication_keeps_distinct_technical_terms(self):
         entities = [
             {"name": "Encoder", "type": "Component", "description": ""},
@@ -83,6 +96,22 @@ class LocalStructuredExtractionTests(unittest.TestCase):
         self.assertEqual(
             retain_relations_with_known_endpoints(relations, ["Encoder", "Feed Forward", "Transformer"]),
             [{"source": "Encoder", "target": "Feed Forward", "type": "USES", "description": ""}],
+        )
+
+    def test_table_pruner_drops_configuration_markers(self):
+        entities = [
+            {"name": "base", "type": "System", "description": ""},
+            {"name": "(A)", "type": "System", "description": ""},
+            {"name": "Transformer (4 layers)", "type": "System", "description": ""},
+            {"name": "F1", "type": "Metric", "description": ""},
+        ]
+
+        self.assertEqual(
+            retain_semantic_table_entities(entities),
+            [
+                {"name": "Transformer (4 layers)", "type": "System", "description": ""},
+                {"name": "F1", "type": "Metric", "description": ""},
+            ],
         )
         self.assertIn(
             '"relations"',
